@@ -1,0 +1,15 @@
+[package]
+name = "ppk2-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Henk Oordt <hd@oordt.dev>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { version = "1.0.60", features = ["backtrace"] }
+serialport = "4.2.0"
+thiserror = "1.0.32"
+
+[[bin]]
+name = "ppk2"
