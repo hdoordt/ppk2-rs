@@ -49,9 +49,16 @@ impl Command {
             Command::ResUserSet => 0,
             Command::SpikeFilteringOn => 0,
             Command::SpikeFilteringOff => 0,
-            Command::GetMetaData => 0,
+            Command::GetMetaData => 1000,
             Command::Reset => 0,
             Command::SetUserGains => 0,
+        }
+    }
+
+    pub fn response_complete(&self, response: &[u8]) -> bool {
+        match self {
+            Command::GetMetaData => response.ends_with(b"END\n"),
+            _ => todo!(),
         }
     }
 }
@@ -75,7 +82,7 @@ impl<'c> Iterator for CommandBytes<'c> {
 
     fn next(&mut self) -> Option<Self::Item> {
         use Command::*;
-        match (self.cmd, self.index) {
+        let b = match (self.cmd, self.index) {
             (NoOp, 0) => Some(0x00),
             (TriggerSet, 0) => Some(0x01),
             (AvgNumSet, 0) => Some(0x02),
@@ -101,6 +108,8 @@ impl<'c> Iterator for CommandBytes<'c> {
             (Reset, 0) => Some(0x20),
             (SetUserGains, 0) => Some(0x25),
             _ => None,
-        }
+        };
+        self.index += 1;
+        b
     }
 }

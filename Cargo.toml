@@ -8,8 +8,6 @@ authors = ["Henk Oordt <hd@oordt.dev>"]
 
 [dependencies]
 anyhow = { version = "1.0.60", features = ["backtrace"] }
+num_enum = "0.5.7"
 serialport = "4.2.0"
 thiserror = "1.0.32"
-
-[[bin]]
-name = "ppk2"
