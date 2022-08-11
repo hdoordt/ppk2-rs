@@ -61,7 +61,7 @@ impl Ppk2 {
             let n = self.port.read(&mut buf)?;
             response.extend_from_slice(&buf[..n]);
         }
-
+        dbg!(response.len());
         Ok(response)
     }
 }

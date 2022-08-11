@@ -27,6 +27,8 @@ pub enum Command {
 }
 
 impl Command {
+    /// The expected length of the response, as a hint 
+    /// indicating how much space we should allocate for a buffer.
     pub fn expected_response_len(&self) -> usize {
         match self {
             Command::NoOp => 0,
@@ -49,7 +51,7 @@ impl Command {
             Command::ResUserSet => 0,
             Command::SpikeFilteringOn => 0,
             Command::SpikeFilteringOff => 0,
-            Command::GetMetaData => 1000,
+            Command::GetMetaData => 512,
             Command::Reset => 0,
             Command::SetUserGains => 0,
         }
