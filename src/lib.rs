@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+use crossbeam::channel::{Receiver, SendError, Sender, TryRecvError};
 use measurement::MeasurementAccumulator;
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use state::{Idle, Measuring, State};
@@ -9,10 +10,7 @@ use std::{
     io,
     marker::PhantomData,
     string::FromUtf8Error,
-    sync::{
-        mpsc::{self, Receiver, SendError},
-        Arc, Condvar, Mutex,
-    },
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::Duration,
 };
@@ -66,6 +64,8 @@ pub enum Error {
     Parse(String),
     #[error("Error sending measurement: {0}")]
     SendMeasurement(#[from] SendError<measurement::Result>),
+    #[error("Worker thread signal error: {0}")]
+    WorkerSignalError(#[from] TryRecvError),
     #[error("Error deserializeing a measurement: {0:?}")]
     DeserializeMeasurement(Vec<u8>),
 }
@@ -137,15 +137,24 @@ impl Ppk2<Idle> {
         Ok(())
     }
 
-    pub fn start_measuring(mut self) -> Result<(Ppk2<Measuring>, Receiver<measurement::Result>)> {
+    pub fn start_measuring(
+        mut self,
+    ) -> Result<(Ppk2<Measuring>, Receiver<measurement::Result>, Sender<()>)> {
+        // Stuff needed to communicate with the main thread
+        // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
-        let (tx, rx) = mpsc::sync_channel::<measurement::Result>(1024);
+        // This channel is for sending measurements to the main thread.
+        let (meas_tx, meas_rx) = crossbeam::channel::bounded::<measurement::Result>(1024);
+        // This channel allows the main thread to notify that the worker thread can stop
+        // parsing data.
+        let (sig_tx, sig_rx) = crossbeam::channel::bounded::<()>(0);
 
         let task_ready = ready.clone();
         let mut port = self.port.try_clone()?;
         let metadata = self.metadata.clone();
         thread::spawn(move || {
             let r = || -> Result<()> {
+                // Create an accumulator with the current device metadata
                 let mut accumulator = MeasurementAccumulator::new(metadata);
                 // First wait for main thread to clear
                 // serial port input buffer
@@ -154,23 +163,32 @@ impl Ppk2<Idle> {
                     .wait_while(lock.lock().unwrap(), |ready| !*ready)
                     .unwrap();
 
-                // Now we read chunks and feed them to the accumulator
-                let mut buf = [0u8; 32];
+                let mut buf = [0u8; 1024];
                 let mut measurement_buf = VecDeque::with_capacity(100);
                 loop {
+                    // Check whether the main thread has signaled
+                    // us to stop
+                    match sig_rx.try_recv() {
+                        Ok(_) => return Ok(()),
+                        Err(TryRecvError::Empty) => {}
+                        Err(e) => return Err(e.into()),
+                    }
+
+                    // Now we read chunks and feed them to the accumulator
                     let n = port.read(&mut buf)?;
                     accumulator.feed_into(&buf[..n], &mut measurement_buf);
                     if !measurement_buf.is_empty() {
                         measurement_buf
                             .drain(..measurement_buf.len())
-                            .try_for_each(|m| tx.send(m))?;
+                            .try_for_each(|m| meas_tx.send(m))?;
                     }
                 }
             };
-            if let Err(e) = r() {
-                // TODO allow for main thread to recover.
+            let res = r();
+            if let Err(e) = &res {
                 tracing::error!("{:?}", e);
-            }
+            };
+            res
         });
         self.port.clear(Input)?;
 
@@ -180,7 +198,7 @@ impl Ppk2<Idle> {
         cvar.notify_all();
 
         self.send_command(Command::AverageStart)?;
-        Ok((self.into_state(), rx))
+        Ok((self.into_state(), meas_rx, sig_tx))
     }
 
     fn set_power_mode(&mut self, mode: PowerMode) -> Result<()> {

@@ -1,18 +1,17 @@
+use anyhow::Result;
+use crossbeam::channel::RecvTimeoutError;
 use ppk2::{
     types::{DevicePower, PowerMode, SourceVoltage},
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use tracing::{debug, warn, Level};
+use std::time::Duration;
+use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-fn main() -> anyhow::Result<()> {
-    // a builder for `FmtSubscriber`.
+fn main() -> Result<()> {
     let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
         .with_max_level(Level::DEBUG)
-        // completes the builder.
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
@@ -28,30 +27,47 @@ fn main() -> anyhow::Result<()> {
 
     ppk2.set_source_voltage(SourceVoltage::from_millivolts(3300))?;
     ppk2.set_device_power(DevicePower::Enabled)?;
-    let (_ppk2, rx) = ppk2.start_measuring()?;
+    let (ppk2, rx, sig_tx) = ppk2.start_measuring()?;
+
     let mut count = 0;
     let mut count_over_1000 = 0;
     let mut count_missed = 0;
-    loop {
-        match rx.recv()? {
-            Ok(m) => {
-                count += 1;
-                if m.analog_value > 1000. {
-                    count_over_1000 += 1;
+    let mut sig_tx = Some(sig_tx);
+
+    ctrlc::set_handler(move || sig_tx.take().unwrap().send(()).unwrap())?;
+    let r: Result<()> = loop {
+        let rcv_res = rx.recv_timeout(Duration::from_millis(500));
+        match rcv_res {
+            Ok(msg) => match msg {
+                Ok(m) => {
+                    count += 1;
+                    if m.analog_value > 1000. {
+                        count_over_1000 += 1;
+                    }
+                    debug!("Got measurement: {m:#?}");
+                    debug!(
+                        "Count: {count}. Over 1000: {}% ({}). Missed: {}% ({})",
+                        100 * count_over_1000 / count,
+                        count_over_1000,
+                        100 * count_missed / count,
+                        count_missed,
+                    );
                 }
-                debug!("Got measurement: {m:#?}");
-                debug!(
-                    "Count: {count}. Over 1000: {}% ({}). Missed: {}% ({})",
-                    100 * count_over_1000 / count,
-                    count_over_1000,
-                    100 * count_missed / count,
-                    count_missed,
-                );
-            }
+
+                Err(e) => {
+                    warn!("Measurement missed: {e:?}");
+                    count_missed += 1;
+                }
+            },
+            Err(RecvTimeoutError::Disconnected) => break Ok(()),
             Err(e) => {
-                warn!("Measurement missed: {e:?}");
-                count_missed += 1;
+                error!("Error receiving data: {e:?}");
+                break Err(e)?;
             }
         }
-    }
+    };
+    info!("Stopping measurements and resetting");
+    ppk2.stop_measuring()?.reset()?;
+    info!("Goodbye!");
+    r
 }

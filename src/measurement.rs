@@ -49,7 +49,7 @@ impl MeasurementAccumulator {
                 consecutive_range_sample: 0,
                 expected_counter: None,
             },
-            buf: Vec::with_capacity(1024),
+            buf: Vec::with_capacity(4096),
         }
     }
 
@@ -124,9 +124,7 @@ fn get_adc_result(
             adc
         });
 
-    if state.prev_range.is_none() {
-        state.prev_range.replace(range);
-    }
+    state.prev_range.get_or_insert(range);
 
     if !matches!(state.prev_range, Some(r) if r == range) || state.after_spike > 0 {
         if matches!(state.prev_range, Some(r) if r == range) {
