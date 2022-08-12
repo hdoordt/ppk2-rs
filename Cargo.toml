@@ -11,3 +11,5 @@ anyhow = { version = "1.0.60", features = ["backtrace"] }
 num_enum = "0.5.7"
 serialport = "4.2.0"
 thiserror = "1.0.32"
+tracing = "0.1.36"
+tracing-subscriber = "0.3.15"

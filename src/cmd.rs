@@ -1,3 +1,5 @@
+use crate::types::{DevicePower, PowerMode, SourceVoltage};
+
 #[repr(u8)]
 /// Serial command opcodes
 pub enum Command {
@@ -12,12 +14,12 @@ pub enum Command {
     RangeSet,
     LcdSet,
     TriggerStop,
-    DeviceRunningSet,
-    RegulatorSet,
+    DeviceRunningSet(DevicePower),
+    RegulatorSet(SourceVoltage),
     SwitchPointDown,
     SwitchPointUp,
     TriggerExtToggle,
-    SetPowerMode { is_sum_mode: bool },
+    SetPowerMode(PowerMode),
     ResUserSet,
     SpikeFilteringOn,
     SpikeFilteringOff,
@@ -27,8 +29,11 @@ pub enum Command {
 }
 
 impl Command {
-    /// The expected length of the response, as a hint 
+    /// The expected length of the response, as a hint
     /// indicating how much space we should allocate for a buffer.
+    /// If no specific branch for the command is defined in
+    /// Command::response_complete, the expected response length
+    /// is used to check whether we received the whole response.
     pub fn expected_response_len(&self) -> usize {
         match self {
             Command::NoOp => 0,
@@ -42,12 +47,12 @@ impl Command {
             Command::RangeSet => 0,
             Command::LcdSet => 0,
             Command::TriggerStop => 0,
-            Command::DeviceRunningSet => 0,
-            Command::RegulatorSet => 0,
+            Command::DeviceRunningSet(_) => 0,
+            Command::RegulatorSet(_) => 0,
             Command::SwitchPointDown => 0,
             Command::SwitchPointUp => 0,
             Command::TriggerExtToggle => 0,
-            Command::SetPowerMode { is_sum_mode: _ } => 0,
+            Command::SetPowerMode(_) => 0,
             Command::ResUserSet => 0,
             Command::SpikeFilteringOn => 0,
             Command::SpikeFilteringOff => 0,
@@ -60,7 +65,7 @@ impl Command {
     pub fn response_complete(&self, response: &[u8]) -> bool {
         match self {
             Command::GetMetaData => response.ends_with(b"END\n"),
-            _ => todo!(),
+            _ => self.expected_response_len() >= response.len(),
         }
     }
 }
@@ -96,13 +101,15 @@ impl<'c> Iterator for CommandBytes<'c> {
             (RangeSet, 0) => Some(0x08),
             (LcdSet, 0) => Some(0x09),
             (TriggerStop, 0) => Some(0x0A),
-            (DeviceRunningSet, 0) => Some(0x0C),
-            (RegulatorSet, 0) => Some(0x0D),
+            (DeviceRunningSet(_), 0) => Some(0x0C),
+            (DeviceRunningSet(pwr), 1) => Some((*pwr).into()),
+            (RegulatorSet(_), 0) => Some(0x0D),
+            (RegulatorSet(vdd), i) if (1..=2).contains(&i) => Some(vdd.raw()[i - 1]),
             (SwitchPointDown, 0) => Some(0x0E),
             (SwitchPointUp, 0) => Some(0x0F),
             (TriggerExtToggle, 0) => Some(0x10),
-            (SetPowerMode { is_sum_mode: _ }, 0) => Some(0x11),
-            (SetPowerMode { is_sum_mode }, 1) => Some(if *is_sum_mode { 0x02 } else { 0x01 }),
+            (SetPowerMode(_), 0) => Some(0x11),
+            (SetPowerMode(mode), 1) => Some((*mode).into()),
             (ResUserSet, 0) => Some(0x12),
             (SpikeFilteringOn, 0) => Some(0x15),
             (SpikeFilteringOff, 0) => Some(0x16),
