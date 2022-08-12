@@ -5,7 +5,7 @@ use ppk2::{
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -30,9 +30,10 @@ fn main() -> Result<()> {
     let (ppk2, rx, sig_tx) = ppk2.start_measuring()?;
 
     let mut count = 0;
-    let mut count_over_1000 = 0;
+    let mut count_over_500 = 0;
     let mut count_missed = 0;
     let mut sig_tx = Some(sig_tx);
+    let mut data = VecDeque::with_capacity(1024);
 
     ctrlc::set_handler(move || sig_tx.take().unwrap().send(()).unwrap())?;
     let r: Result<()> = loop {
@@ -40,15 +41,21 @@ fn main() -> Result<()> {
         match rcv_res {
             Ok(msg) => match msg {
                 Ok(m) => {
+                    if data.len() >= 1024 {
+                        data.pop_back();
+                    }
+                    data.push_front(m.analog_value);
+                    let sum: f32 = data.iter().sum();
+                    let avg = sum / data.len() as f32;
                     count += 1;
-                    if m.analog_value > 1000. {
-                        count_over_1000 += 1;
+                    if m.analog_value > 500. {
+                        count_over_500 += 1;
                     }
                     debug!("Got measurement: {m:#?}");
                     debug!(
-                        "Count: {count}. Over 1000: {}% ({}). Missed: {}% ({})",
-                        100 * count_over_1000 / count,
-                        count_over_1000,
+                        "Avg: {avg}, Count: {count}. Over 500: {}% ({}). Missed: {}% ({})",
+                        100 * count_over_500 / count,
+                        count_over_500,
                         100 * count_missed / count,
                         count_missed,
                     );
