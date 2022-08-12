@@ -1,10 +1,14 @@
-use std::{collections::VecDeque, slice::Chunks};
-
-use tracing::warn;
+use std::collections::VecDeque;
 
 use crate::types::Metadata;
 
-pub type Result = std::result::Result<Measurement, Vec<u8>>;
+#[derive(Clone, Debug)]
+pub struct MeasurementMissed {
+    pub expected_counter: Option<u8>,
+    pub actual_counter: u8,
+}
+
+pub type Result = std::result::Result<Measurement, MeasurementMissed>;
 
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
 const SPIKE_FILTER_ALPHA: f32 = 0.18;
@@ -13,9 +17,9 @@ const SPIKE_FILTER_SAMPLES: isize = 3;
 
 #[derive(Debug)]
 pub struct Measurement {
-    counter: u32,
-    analog_value: f32,
-    bits: u32,
+    pub counter: u8,
+    pub analog_value: f32,
+    pub bits: u32,
 }
 
 struct AccumulatorState {
@@ -24,7 +28,7 @@ struct AccumulatorState {
     prev_range: Option<usize>,
     after_spike: isize,
     consecutive_range_sample: usize,
-    expected_counter: Option<u32>,
+    expected_counter: Option<u8>,
 }
 
 pub struct MeasurementAccumulator {
@@ -58,7 +62,7 @@ impl MeasurementAccumulator {
         for chunk in chunks {
             let raw = u32::from_le_bytes(chunk); // Not sure if LE or BE
             let current_measurement_range = get_range(raw) as usize;
-            let counter = get_counter(raw);
+            let counter = get_counter(raw) as u8;
             let adc_result = get_adc(raw) * 4;
             let bits = get_logic(raw);
             let analog_value = get_adc_result(
@@ -73,9 +77,10 @@ impl MeasurementAccumulator {
             let prev_expected_counter = self.state.expected_counter;
             self.state.expected_counter.replace((counter + 1) % 64);
             if prev_expected_counter != Some(counter) {
-                // TODO message dropped, signal main thread
-                warn!("Message dropped: expected counter {prev_expected_counter:?}, got {counter}");
-                continue;
+                buf.push_back(Err(MeasurementMissed {
+                    expected_counter: prev_expected_counter,
+                    actual_counter: counter,
+                }))
             }
             buf.push_back(Ok(Measurement {
                 counter,
@@ -153,8 +158,7 @@ const fn generate_mask(bits: u32, pos: u32) -> u32 {
 macro_rules! masked_value {
     ($name:ident, $bits:literal, $pos:literal) => {
         fn $name(raw: u32) -> u32 {
-            const MASK: u32 = generate_mask($bits, $pos);
-            (raw & MASK) >> $pos
+            (raw & generate_mask($bits, $pos)) >> $pos
         }
     };
 }

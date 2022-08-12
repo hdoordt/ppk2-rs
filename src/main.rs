@@ -3,7 +3,7 @@ use ppk2_rs::{
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use tracing::{error, info, Level};
+use tracing::{debug, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 fn main() -> anyhow::Result<()> {
@@ -28,22 +28,30 @@ fn main() -> anyhow::Result<()> {
 
     ppk2.set_source_voltage(SourceVoltage::from_millivolts(3300))?;
     ppk2.set_device_power(DevicePower::Enabled)?;
-    let (ppk2, rx) = ppk2.start_measuring()?;
-
+    let (_ppk2, rx) = ppk2.start_measuring()?;
+    let mut count = 0;
+    let mut count_over_1000 = 0;
+    let mut count_missed = 0;
     loop {
         match rx.recv()? {
             Ok(m) => {
-                info!("Got measurement: {m:#?}");
+                count += 1;
+                if m.analog_value > 1000. {
+                    count_over_1000 += 1;
+                }
+                debug!("Got measurement: {m:#?}");
+                debug!(
+                    "Count: {count}. Over 1000: {}% ({}). Missed: {}% ({})",
+                    100 * count_over_1000 / count,
+                    count_over_1000,
+                    100 * count_missed / count,
+                    count_missed,
+                );
             }
             Err(e) => {
-                error!("{e:?}");
-                break;
+                warn!("Measurement missed: {e:?}");
+                count_missed += 1;
             }
         }
     }
-
-    // std::thread::sleep(std::time::Duration::from_secs(5));
-    let ppk2 = ppk2.stop_measuring()?;
-    ppk2.reset()?;
-    Ok(())
 }

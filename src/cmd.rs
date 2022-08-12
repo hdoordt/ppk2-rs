@@ -71,7 +71,7 @@ impl Command {
 }
 
 impl Command {
-    pub fn bytes<'b>(&'b self) -> CommandBytes<'b> {
+    pub fn bytes(&self) -> CommandBytes<'_> {
         CommandBytes {
             cmd: self,
             index: 0,

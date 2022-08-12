@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-use measurement::{Measurement, MeasurementAccumulator};
-use serialport::{ClearBuffer::Input, SerialPort};
+use measurement::MeasurementAccumulator;
+use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use state::{Idle, Measuring, State};
 use std::{
     borrow::Cow,
@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use types::{DevicePower, Metadata, PowerMode, SourceVoltage, Modifiers};
+use types::{DevicePower, Metadata, PowerMode, SourceVoltage};
 
 use crate::cmd::Command;
 
@@ -109,12 +109,14 @@ impl Ppk2<Idle> {
     pub fn new<'a>(path: impl Into<Cow<'a, str>>, mode: PowerMode) -> Result<Self> {
         let port = serialport::new(path, 9600)
             .timeout(Duration::from_millis(500))
+            .flow_control(FlowControl::Hardware)
             .open()?;
         let mut ppk2 = Self {
             port,
             metadata: Metadata::default(),
             _state: PhantomData,
         };
+
         ppk2.metadata = ppk2.get_metadata()?;
         ppk2.set_power_mode(mode)?;
         Ok(ppk2)
@@ -137,24 +139,24 @@ impl Ppk2<Idle> {
 
     pub fn start_measuring(mut self) -> Result<(Ppk2<Measuring>, Receiver<measurement::Result>)> {
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
-        let (tx, rx) = mpsc::channel::<measurement::Result>();
+        let (tx, rx) = mpsc::sync_channel::<measurement::Result>(1024);
 
         let task_ready = ready.clone();
         let mut port = self.port.try_clone()?;
         let metadata = self.metadata.clone();
         thread::spawn(move || {
-            let mut r = || -> Result<()> {
+            let r = || -> Result<()> {
                 let mut accumulator = MeasurementAccumulator::new(metadata);
                 // First wait for main thread to clear
-                // serial ports input buffer.
+                // serial port input buffer
                 let (lock, cvar) = &*task_ready;
-                let _ = cvar
+                let _l = cvar
                     .wait_while(lock.lock().unwrap(), |ready| !*ready)
                     .unwrap();
 
                 // Now we read chunks and feed them to the accumulator
                 let mut buf = [0u8; 32];
-                let mut measurement_buf = VecDeque::with_capacity(10);
+                let mut measurement_buf = VecDeque::with_capacity(100);
                 loop {
                     let n = port.read(&mut buf)?;
                     accumulator.feed_into(&buf[..n], &mut measurement_buf);
@@ -166,6 +168,7 @@ impl Ppk2<Idle> {
                 }
             };
             if let Err(e) = r() {
+                // TODO allow for main thread to recover.
                 tracing::error!("{:?}", e);
             }
         });
