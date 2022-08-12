@@ -1,5 +1,5 @@
 [package]
-name = "ppk2-rs"
+name = "ppk2"
 version = "0.1.0"
 edition = "2021"
 authors = ["Henk Oordt <hd@oordt.dev>"]

@@ -1,4 +1,4 @@
-use ppk2_rs::{
+use ppk2::{
     types::{DevicePower, PowerMode, SourceVoltage},
     Error, Ppk2,
 };
