@@ -1,4 +1,6 @@
-use std::{collections::VecDeque, io::Write};
+use std::{collections::VecDeque, slice::Chunks};
+
+use tracing::warn;
 
 use crate::types::Metadata;
 
@@ -7,20 +9,22 @@ pub type Result = std::result::Result<Measurement, Vec<u8>>;
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
 const SPIKE_FILTER_ALPHA: f32 = 0.18;
 const SPIKE_FILTER_ALPHA_5: f32 = 0.06;
-const SPIKE_FILTER_SAMPLES: usize = 3;
+const SPIKE_FILTER_SAMPLES: isize = 3;
 
 #[derive(Debug)]
 pub struct Measurement {
-    index: usize,
-    inner: u8,
+    counter: u32,
+    analog_value: f32,
+    bits: u32,
 }
 
 struct AccumulatorState {
     rolling_avg_4: Option<f32>,
     rolling_avg: Option<f32>,
     prev_range: Option<usize>,
-    after_spike: usize,
+    after_spike: isize,
     consecutive_range_sample: usize,
+    expected_counter: Option<u32>,
 }
 
 pub struct MeasurementAccumulator {
@@ -39,6 +43,7 @@ impl MeasurementAccumulator {
                 prev_range: None,
                 after_spike: 0,
                 consecutive_range_sample: 0,
+                expected_counter: None,
             },
             buf: Vec::with_capacity(1024),
         }
@@ -49,10 +54,12 @@ impl MeasurementAccumulator {
             return;
         }
         self.buf.extend_from_slice(bytes);
-        for chunk in self.buf.chunks_exact(4).map(|c| c.try_into().unwrap()) {
+        let chunks = self.buf.chunks_exact(4).map(|c| c.try_into().unwrap());
+        for chunk in chunks {
             let raw = u32::from_le_bytes(chunk); // Not sure if LE or BE
             let current_measurement_range = get_range(raw) as usize;
-            let adc_result = get_adc(raw);
+            let counter = get_counter(raw);
+            let adc_result = get_adc(raw) * 4;
             let bits = get_logic(raw);
             let analog_value = get_adc_result(
                 &self.metadata,
@@ -60,6 +67,21 @@ impl MeasurementAccumulator {
                 current_measurement_range,
                 adc_result,
             ) * 10f32.powi(6);
+            if self.state.expected_counter.is_none() {
+                self.state.expected_counter.replace(counter);
+            }
+            let prev_expected_counter = self.state.expected_counter;
+            self.state.expected_counter.replace((counter + 1) % 64);
+            if prev_expected_counter != Some(counter) {
+                // TODO message dropped, signal main thread
+                warn!("Message dropped: expected counter {prev_expected_counter:?}, got {counter}");
+                continue;
+            }
+            buf.push_back(Ok(Measurement {
+                counter,
+                analog_value,
+                bits,
+            }))
         }
     }
 }

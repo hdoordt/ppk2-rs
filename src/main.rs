@@ -3,7 +3,7 @@ use ppk2_rs::{
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use tracing::{error, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 fn main() -> anyhow::Result<()> {
@@ -28,12 +28,13 @@ fn main() -> anyhow::Result<()> {
 
     ppk2.set_source_voltage(SourceVoltage::from_millivolts(3300))?;
     ppk2.set_device_power(DevicePower::Enabled)?;
-    dbg!(ppk2.get_metadata()?);
     let (ppk2, rx) = ppk2.start_measuring()?;
 
     loop {
         match rx.recv()? {
-            Ok(m) => {dbg!(m);},
+            Ok(m) => {
+                info!("Got measurement: {m:#?}");
+            }
             Err(e) => {
                 error!("{e:?}");
                 break;
