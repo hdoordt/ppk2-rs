@@ -29,7 +29,7 @@ impl SourceVoltage {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Modifiers {
     pub r: [f32; 5],
     pub gs: [f32; 5],
@@ -55,7 +55,7 @@ impl Default for Modifiers {
 }
 
 #[repr(u8)]
-#[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy)]
+#[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum PowerMode {
     Ampere = 0x01,
     #[default]
@@ -63,14 +63,14 @@ pub enum PowerMode {
 }
 
 #[repr(u8)]
-#[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy)]
+#[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DevicePower {
     #[default]
     Disabled = 0x00,
     Enabled = 0x01,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Metadata {
     pub modifiers: Modifiers,
     pub calibrated: bool,
@@ -82,7 +82,7 @@ pub struct Metadata {
 
 impl Metadata {
     /// Example metadata:
-    /// ```
+    /// ```notest
     /// Calibrated: 0
     /// R0: 1003.3506
     /// R1: 101.5865
@@ -215,46 +215,46 @@ impl Metadata {
                     metadata.modifiers.s[0] = s0.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("S1", s1)) => {
-                    metadata.modifiers.s[0] = s1.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.s[1] = s1.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("S2", s2)) => {
-                    metadata.modifiers.s[0] = s2.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.s[2] = s2.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("S3", s3)) => {
-                    metadata.modifiers.s[0] = s3.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.s[3] = s3.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("S4", s4)) => {
-                    metadata.modifiers.s[0] = s4.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.s[4] = s4.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("I0", i0)) => {
                     metadata.modifiers.i[0] = i0.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("I1", i1)) => {
-                    metadata.modifiers.i[0] = i1.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.i[1] = i1.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("I2", i2)) => {
-                    metadata.modifiers.i[0] = i2.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.i[2] = i2.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("I3", i3)) => {
-                    metadata.modifiers.i[0] = i3.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.i[3] = i3.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("I4", i4)) => {
-                    metadata.modifiers.i[0] = i4.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.i[4] = i4.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("UG0", ug0)) => {
                     metadata.modifiers.ug[0] = ug0.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("UG1", ug1)) => {
-                    metadata.modifiers.ug[0] = ug1.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.ug[1] = ug1.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("UG2", ug2)) => {
-                    metadata.modifiers.ug[0] = ug2.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.ug[2] = ug2.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("UG3", ug3)) => {
-                    metadata.modifiers.ug[0] = ug3.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.ug[3] = ug3.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("UG4", ug4)) => {
-                    metadata.modifiers.ug[0] = ug4.parse().map_err(|_| Parse(line.to_owned()))?
+                    metadata.modifiers.ug[4] = ug4.parse().map_err(|_| Parse(line.to_owned()))?
                 }
                 Some(("IA", ia)) => metadata.ia = ia.parse().map_err(|_| Parse(line.to_owned()))?,
                 None if line == "END" => return Ok(metadata),
@@ -263,5 +263,95 @@ impl Metadata {
         }
 
         Ok(metadata)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::types::Metadata;
+
+    use super::{Modifiers, PowerMode};
+
+    #[test]
+    #[ignore = "assert_eq! doesn't work for floats, need to find another solution"]
+    pub fn get_adc_result() {
+        let raw_metadata = r#"Calibrated: 0
+R0: 1003.3506
+R1: 101.5865
+R2: 10.3027
+R3: 0.9636
+R4: 0.0564
+GS0: 0.0000
+GS1: 112.7890
+GS2: 18.0115
+GS3: 2.4217
+GS4: 0.0729
+GI0: 1.0000
+GI1: 0.9695
+GI2: 0.9609
+GI3: 0.9519
+GI4: 0.9582
+O0: 112.9420
+O1: 75.4627
+O2: 64.6020
+O3: 50.4983
+O4: 87.2177
+VDD: 3741
+HW: 9173
+mode: 2
+S0: 0.000000048
+S1: 0.000000596
+S2: 0.000005281
+S3: 0.000062577
+S4: 0.002940743
+I0: -0.000000104
+I1: -0.000001443
+I2: 0.000036439
+I3: -0.000374119
+I4: -0.009388455
+UG0: 1.00
+UG1: 1.00
+UG2: 1.00
+UG3: 1.00
+UG4: 1.00
+IA: 56
+END
+"#;
+        let metadata =
+            Metadata::parse(Vec::from(raw_metadata.as_bytes())).expect("Error parsing metadata");
+
+        let expected_modifiers = Modifiers {
+            r: [1003.3506, 101.5865, 10.3027, 0.9636, 0.0564],
+            gs: [0.0000, 112.7890, 18.0115, 2.4217, 0.0729],
+            gi: [1.0000, 0.9695, 0.9609, 0.9519, 0.9582],
+            o: [112.9420, 75.4627, 64.6020, 50.4983, 87.2177],
+            s: [
+                0.000000048,
+                0.000000596,
+                0.000005281,
+                0.000062577,
+                0.002940743,
+            ],
+            i: [
+                -0.000000104,
+                -0.000001443,
+                0.000036439,
+                -0.000374119,
+                -0.009388455,
+            ],
+            ug: [1.00, 1.00, 1.00, 1.00, 1.00],
+        };
+
+        let expected_metadata = Metadata {
+            modifiers: expected_modifiers,
+            calibrated: false,
+            vdd: 3714,
+            hw: 9173,
+            mode: PowerMode::Source,
+            ia: 56,
+        };
+
+        assert_eq!(expected_metadata, metadata);
     }
 }

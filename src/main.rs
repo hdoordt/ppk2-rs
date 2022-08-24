@@ -41,7 +41,7 @@ fn main() -> Result<()> {
         match rcv_res {
             Ok(msg) => match msg {
                 Ok(m) => {
-                    if data.len() >= 1024 {
+                    if data.len() >= 2048 {
                         data.pop_back();
                     }
                     data.push_front(m.analog_value);
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
                     }
                     debug!("Got measurement: {m:#?}");
                     debug!(
-                        "Avg: {avg}, Count: {count}. Over 500: {}% ({}). Missed: {}% ({})",
+                        "Avg: {avg} mA, Count: {count}. Over 500: {}% ({}). Missed: {}% ({})",
                         100 * count_over_500 / count,
                         count_over_500,
                         100 * count_missed / count,

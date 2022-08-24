@@ -60,9 +60,21 @@ impl MeasurementAccumulator {
         self.buf.extend_from_slice(bytes);
         let chunks = self.buf.chunks_exact(4).map(|c| c.try_into().unwrap());
         for chunk in chunks {
-            let raw = u32::from_le_bytes(chunk); // Not sure if LE or BE
-            let current_measurement_range = get_range(raw) as usize;
+            let raw = u32::from_le_bytes(chunk);
+            let current_measurement_range = get_range(raw).min(4) as usize;
             let counter = get_counter(raw) as u8;
+
+            let prev_expected_counter = self.state.expected_counter;
+            // Wrap at 63 + 1
+            self.state.expected_counter.replace((counter + 1) & 0x3F);
+            if prev_expected_counter != Some(counter) {
+                buf.push_back(Err(MeasurementMissed {
+                    expected_counter: prev_expected_counter,
+                    actual_counter: counter,
+                }));
+                continue;
+            }
+
             let adc_result = get_adc(raw) * 4;
             let bits = get_logic(raw);
             let analog_value = get_adc_result(
@@ -74,14 +86,7 @@ impl MeasurementAccumulator {
             if self.state.expected_counter.is_none() {
                 self.state.expected_counter.replace(counter);
             }
-            let prev_expected_counter = self.state.expected_counter;
-            self.state.expected_counter.replace((counter + 1) % 64);
-            if prev_expected_counter != Some(counter) {
-                buf.push_back(Err(MeasurementMissed {
-                    expected_counter: prev_expected_counter,
-                    actual_counter: counter,
-                }))
-            }
+
             buf.push_back(Ok(Measurement {
                 counter,
                 analog_value,
@@ -103,7 +108,7 @@ fn get_adc_result(
         (adc_val as f32 - modifiers.o[range]) * (ADC_MULTIPLIER / modifiers.r[range]);
     let mut adc = modifiers.ug[range]
         * (result_without_gain * (modifiers.gs[range] * result_without_gain + modifiers.gi[range])
-            + (modifiers.s[range] * (metadata.vdd as f32 / 1000.) + modifiers.i[range]));
+            + (modifiers.s[range] * (f32::from(metadata.vdd) / 1000.) + modifiers.i[range]));
 
     let prev_rolling_avg_4 = state.rolling_avg_4;
     let prev_rolling_avg = state.rolling_avg;
@@ -165,3 +170,75 @@ masked_value!(get_adc, 14, 0);
 masked_value!(get_range, 3, 14);
 masked_value!(get_counter, 6, 18);
 masked_value!(get_logic, 8, 24);
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        measurement::{get_adc_result, AccumulatorState},
+        types::Metadata,
+    };
+
+    #[test]
+    pub fn test_get_adc_result() {
+        let raw_metadata = r#"Calibrated: 0
+R0: 1003.3506
+R1: 101.5865
+R2: 10.3027
+R3: 0.9636
+R4: 0.0564
+GS0: 0.0000
+GS1: 112.7890
+GS2: 18.0115
+GS3: 2.4217
+GS4: 0.0729
+GI0: 1.0000
+GI1: 0.9695
+GI2: 0.9609
+GI3: 0.9519
+GI4: 0.9582
+O0: 112.9420
+O1: 75.4627
+O2: 64.6020
+O3: 50.4983
+O4: 87.2177
+VDD: 3741
+HW: 9173
+mode: 2
+S0: 0.000000048
+S1: 0.000000596
+S2: 0.000005281
+S3: 0.000062577
+S4: 0.002940743
+I0: -0.000000104
+I1: -0.000001443
+I2: 0.000036439
+I3: -0.000374119
+I4: -0.009388455
+UG0: 1.00
+UG1: 1.00
+UG2: 1.00
+UG3: 1.00
+UG4: 1.00
+IA: 56
+END
+"#;
+        let metadata =
+            Metadata::parse(Vec::from(raw_metadata.as_bytes())).expect("Error parsing metadata");
+
+        let mut state = AccumulatorState {
+            rolling_avg_4: Some(9.478947833765696e-8),
+            rolling_avg: Some(1.0589385070753649e-7),
+            prev_range: Some(0),
+            after_spike: 0,
+            consecutive_range_sample: 0,
+            expected_counter: Some(62),
+        };
+        let range: usize = 0;
+        let adc_val: u32 = 108;
+        let adc_result = get_adc_result(&metadata, &mut state, range, adc_val) * 10f32.powi(6);
+
+        // JS result: 0.021454880761611544
+        assert!((adc_result - 0.021454880761611544).abs() < f32::EPSILON)
+    }
+}
+
