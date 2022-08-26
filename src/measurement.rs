@@ -18,7 +18,7 @@ const SPIKE_FILTER_SAMPLES: isize = 3;
 #[derive(Debug)]
 pub struct Measurement {
     pub counter: u8,
-    pub analog_value: f32,
+    pub micro_amps: f32,
     pub bits: u32,
 }
 
@@ -77,7 +77,7 @@ impl MeasurementAccumulator {
 
             let adc_result = get_adc(raw) * 4;
             let bits = get_logic(raw);
-            let analog_value = get_adc_result(
+            let micro_amps = get_adc_result(
                 &self.metadata,
                 &mut self.state,
                 current_measurement_range,
@@ -89,7 +89,7 @@ impl MeasurementAccumulator {
 
             buf.push_back(Ok(Measurement {
                 counter,
-                analog_value,
+                micro_amps,
                 bits,
             }))
         }

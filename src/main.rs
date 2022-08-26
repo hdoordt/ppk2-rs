@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     let mut count_over_500 = 0;
     let mut count_missed = 0;
     let mut sig_tx = Some(sig_tx);
-    let mut data = VecDeque::with_capacity(1024);
+    let mut data = VecDeque::with_capacity(2048);
 
     ctrlc::set_handler(move || sig_tx.take().unwrap().send(()).unwrap())?;
     let r: Result<()> = loop {
@@ -44,16 +44,16 @@ fn main() -> Result<()> {
                     if data.len() >= 2048 {
                         data.pop_back();
                     }
-                    data.push_front(m.analog_value);
+                    data.push_front(m.micro_amps);
                     let sum: f32 = data.iter().sum();
                     let avg = sum / data.len() as f32;
                     count += 1;
-                    if m.analog_value > 500. {
+                    if m.micro_amps > 5000. {
                         count_over_500 += 1;
                     }
                     debug!("Got measurement: {m:#?}");
                     debug!(
-                        "Avg: {avg} mA, Count: {count}. Over 500: {}% ({}). Missed: {}% ({})",
+                        "Avg: {avg} μA, Count: {count}. Over 5000: {}% ({}). Missed: {}% ({})",
                         100 * count_over_500 / count,
                         count_over_500,
                         100 * count_missed / count,
