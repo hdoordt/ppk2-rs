@@ -29,11 +29,8 @@ fn main() -> Result<()> {
     ppk2.set_device_power(DevicePower::Enabled)?;
     let (ppk2, rx, sig_tx) = ppk2.start_measuring()?;
 
-    let mut count = 0;
-    let mut count_over_500 = 0;
-    let mut count_missed = 0;
     let mut sig_tx = Some(sig_tx);
-    let mut data = VecDeque::with_capacity(2048);
+    let mut data_buf = VecDeque::with_capacity(2048);
 
     ctrlc::set_handler(move || sig_tx.take().unwrap().send(()).unwrap())?;
     let r: Result<()> = loop {
@@ -41,29 +38,17 @@ fn main() -> Result<()> {
         match rcv_res {
             Ok(msg) => match msg {
                 Ok(m) => {
-                    if data.len() >= 2048 {
-                        data.pop_back();
+                    if data_buf.len() >= 2048 {
+                        data_buf.pop_back();
                     }
-                    data.push_front(m.micro_amps);
-                    let sum: f32 = data.iter().sum();
-                    let avg = sum / data.len() as f32;
-                    count += 1;
-                    if m.micro_amps > 5000. {
-                        count_over_500 += 1;
-                    }
-                    debug!("Got measurement: {m:#?}");
-                    debug!(
-                        "Avg: {avg} μA, Count: {count}. Over 5000: {}% ({}). Missed: {}% ({})",
-                        100 * count_over_500 / count,
-                        count_over_500,
-                        100 * count_missed / count,
-                        count_missed,
-                    );
+                    data_buf.push_front(m.micro_amps);
+                    let sum: f32 = data_buf.iter().sum();
+                    let avg = sum / data_buf.len() as f32;
+                    debug!("Last: {:.4} μA\tAverage: {avg:.4} μA", m.micro_amps);
                 }
 
                 Err(e) => {
                     warn!("Measurement missed: {e:?}");
-                    count_missed += 1;
                 }
             },
             Err(RecvTimeoutError::Disconnected) => break Ok(()),
