@@ -139,7 +139,11 @@ impl Ppk2<Idle> {
 
     pub fn start_measuring(
         mut self,
-    ) -> Result<(Ppk2<Measuring>, Receiver<measurement::Result>, Sender<()>)> {
+    ) -> Result<(
+        Ppk2<Measuring>,
+        Receiver<measurement::Result>,
+        impl FnOnce() -> std::result::Result<(), SendError<()>>,
+    )> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
@@ -198,7 +202,8 @@ impl Ppk2<Idle> {
         cvar.notify_all();
 
         self.send_command(Command::AverageStart)?;
-        Ok((self.into_state(), meas_rx, sig_tx))
+        let stop = move || sig_tx.send(());
+        Ok((self.into_state(), meas_rx, stop))
     }
 
     fn set_power_mode(&mut self, mode: PowerMode) -> Result<()> {

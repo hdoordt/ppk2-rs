@@ -27,12 +27,12 @@ fn main() -> Result<()> {
 
     ppk2.set_source_voltage(SourceVoltage::from_millivolts(3300))?;
     ppk2.set_device_power(DevicePower::Enabled)?;
-    let (ppk2, rx, sig_tx) = ppk2.start_measuring()?;
+    let (ppk2, rx, kill) = ppk2.start_measuring()?;
 
-    let mut sig_tx = Some(sig_tx);
+    let mut kill = Some(kill);
     let mut data_buf = VecDeque::with_capacity(2048);
 
-    ctrlc::set_handler(move || sig_tx.take().unwrap().send(()).unwrap())?;
+    ctrlc::set_handler(move || kill.take().unwrap()().unwrap())?;
     let r: Result<()> = loop {
         let rcv_res = rx.recv_timeout(Duration::from_millis(500));
         match rcv_res {
