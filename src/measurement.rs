@@ -1,13 +1,19 @@
+//! Measurement parsing and preprocessing
+
 use std::collections::VecDeque;
 
 use crate::types::Metadata;
 
 #[derive(Clone, Debug)]
+/// Indicates that one or more measurements were missed.
 pub struct MeasurementMissed {
+    /// The counter that was expected to come with this measurement
     pub expected_counter: Option<u8>,
+    /// The actual counter
     pub actual_counter: u8,
 }
 
+/// A Result type that encapsulates either a [Measurement] or [MeasurementMissed].
 pub type Result = std::result::Result<Measurement, MeasurementMissed>;
 
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
@@ -16,10 +22,12 @@ const SPIKE_FILTER_ALPHA_5: f32 = 0.06;
 const SPIKE_FILTER_SAMPLES: isize = 3;
 
 #[derive(Debug)]
+/// A single parsed measurement
 pub struct Measurement {
+    /// The measurement counter. Wraps at 64.
     pub counter: u8,
+    /// The measured current in mA.
     pub micro_amps: f32,
-    pub bits: u32,
 }
 
 struct AccumulatorState {
@@ -31,6 +39,9 @@ struct AccumulatorState {
     expected_counter: Option<u8>,
 }
 
+/// An acumulator for [Measurement]s. Keeps an internal state
+/// as well as a byte buffer and builds [Measurement]s from bytes
+/// that were fed. See [MeasurementAccumulator::feed_into] for more details.
 pub struct MeasurementAccumulator {
     state: AccumulatorState,
     buf: Vec<u8>,
@@ -38,6 +49,9 @@ pub struct MeasurementAccumulator {
 }
 
 impl MeasurementAccumulator {
+    /// Create a new [MeasurementAccumulator], that uses the
+    /// passed [Metadata] to parse the measurements. Make sure the
+    /// [Metadata] is recent.
     pub fn new(metadata: Metadata) -> Self {
         Self {
             metadata,
@@ -53,13 +67,17 @@ impl MeasurementAccumulator {
         }
     }
 
+    /// Feed a number of bytes to the accumulator, pushing the [Result]s into the
+    /// passed ring buffer.
     pub fn feed_into(&mut self, bytes: &[u8], buf: &mut VecDeque<Result>) {
         if bytes.is_empty() {
             return;
         }
         self.buf.extend_from_slice(bytes);
         let end = self.buf.len() - self.buf.len() % 4;
-        let chunks = self.buf[..end].chunks_exact(4).map(|c| c.try_into().unwrap());
+        let chunks = self.buf[..end]
+            .chunks_exact(4)
+            .map(|c| c.try_into().unwrap());
         for chunk in chunks {
             let raw = u32::from_le_bytes(chunk);
             let current_measurement_range = get_range(raw).min(4) as usize;
@@ -77,7 +95,7 @@ impl MeasurementAccumulator {
             }
 
             let adc_result = get_adc(raw) * 4;
-            let bits = get_logic(raw);
+            let _bits = get_logic(raw);
             let micro_amps = get_adc_result(
                 &self.metadata,
                 &mut self.state,
@@ -91,7 +109,6 @@ impl MeasurementAccumulator {
             buf.push_back(Ok(Measurement {
                 counter,
                 micro_amps,
-                bits,
             }))
         }
         self.buf.drain(..end);
@@ -243,4 +260,3 @@ END
         assert!((adc_result - 0.021454880761611544).abs() < f32::EPSILON)
     }
 }
-

@@ -1,7 +1,10 @@
-use crate::types::{DevicePower, PowerMode, SourceVoltage};
+//! Command definitions
+use crate::types::{DevicePower, MeasurementMode, SourceVoltage};
 
 #[repr(u8)]
 /// Serial command opcodes
+/// Most commands are not used yet in the current version.
+#[allow(missing_docs)]
 pub enum Command {
     NoOp,
     TriggerSet,
@@ -14,16 +17,21 @@ pub enum Command {
     RangeSet,
     LcdSet,
     TriggerStop,
+    /// Enable or disable device
     DeviceRunningSet(DevicePower),
+    /// Set device source voltage
     RegulatorSet(SourceVoltage),
     SwitchPointDown,
     SwitchPointUp,
     TriggerExtToggle,
-    SetPowerMode(PowerMode),
+    /// Set measurement mode
+    SetPowerMode(MeasurementMode),
     ResUserSet,
     SpikeFilteringOn,
     SpikeFilteringOff,
+    /// Fetch device metadata
     GetMetaData,
+    /// Reset the device
     Reset,
     SetUserGains,
 }
@@ -62,7 +70,7 @@ impl Command {
         }
     }
 
-    pub fn response_complete(&self, response: &[u8]) -> bool {
+    pub(crate) fn response_complete(&self, response: &[u8]) -> bool {
         match self {
             Command::GetMetaData => response.ends_with(b"END\n"),
             _ => self.expected_response_len() >= response.len(),
@@ -71,6 +79,7 @@ impl Command {
 }
 
 impl Command {
+    /// Get raw command bytes iterator
     pub fn bytes(&self) -> CommandBytes<'_> {
         CommandBytes {
             cmd: self,
@@ -79,6 +88,7 @@ impl Command {
     }
 }
 
+/// Iterator that iterates over the raw command bytes
 pub struct CommandBytes<'c> {
     cmd: &'c Command,
     index: usize,
