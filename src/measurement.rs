@@ -58,7 +58,8 @@ impl MeasurementAccumulator {
             return;
         }
         self.buf.extend_from_slice(bytes);
-        let chunks = self.buf.chunks_exact(4).map(|c| c.try_into().unwrap());
+        let end = self.buf.len() - self.buf.len() % 4;
+        let chunks = self.buf[..end].chunks_exact(4).map(|c| c.try_into().unwrap());
         for chunk in chunks {
             let raw = u32::from_le_bytes(chunk);
             let current_measurement_range = get_range(raw).min(4) as usize;
@@ -93,6 +94,7 @@ impl MeasurementAccumulator {
                 bits,
             }))
         }
+        self.buf.drain(..end);
     }
 }
 
