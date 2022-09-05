@@ -1,7 +1,10 @@
+//! Several utility types used to communicate with the device.
+
 use crate::{Error, Result};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 #[derive(Default, Debug)]
+/// Device source voltage.
 pub struct SourceVoltage {
     raw: [u8; 2],
 }
@@ -11,6 +14,7 @@ impl SourceVoltage {
     const VDD_MAX_MV: u16 = 5000;
     const OFFSET: u16 = 32;
 
+    /// Create a [SourceVoltage] from the passed amount of millivolts.
     pub fn from_millivolts(mv: u16) -> Self {
         let mv = mv.clamp(Self::VDD_MIN_MV, Self::VDD_MAX_MV);
 
@@ -24,20 +28,20 @@ impl SourceVoltage {
         }
     }
 
-    pub fn raw(&self) -> &[u8; 2] {
+    pub(crate) fn raw(&self) -> &[u8; 2] {
         &self.raw
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Modifiers {
-    pub r: [f32; 5],
-    pub gs: [f32; 5],
-    pub gi: [f32; 5],
-    pub o: [f32; 5],
-    pub s: [f32; 5],
-    pub i: [f32; 5],
-    pub ug: [f32; 5],
+pub(crate) struct Modifiers {
+    pub(crate) r: [f32; 5],
+    pub(crate) gs: [f32; 5],
+    pub(crate) gi: [f32; 5],
+    pub(crate) o: [f32; 5],
+    pub(crate) s: [f32; 5],
+    pub(crate) i: [f32; 5],
+    pub(crate) ug: [f32; 5],
 }
 
 impl Default for Modifiers {
@@ -56,27 +60,41 @@ impl Default for Modifiers {
 
 #[repr(u8)]
 #[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum PowerMode {
+/// Device current measurement mode
+pub enum MeasurementMode {
+    /// Act as ammeter, measuring the current through the
+    /// VIN and GND pins.
     Ampere = 0x01,
     #[default]
+    /// Act as source meter, returing the current supplied
+    /// from the device voltage source.
     Source = 0x02,
 }
 
 #[repr(u8)]
 #[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// Device power
 pub enum DevicePower {
     #[default]
+    /// Device is disabled
     Disabled = 0x00,
+    /// Device is enabled
     Enabled = 0x01,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
+/// parsed device metadata
 pub struct Metadata {
-    pub modifiers: Modifiers,
+    pub(crate) modifiers: Modifiers,
+    /// Whether or not the device was calibrated
     pub calibrated: bool,
+    /// Device source voltage setting
     pub vdd: u16,
+    #[allow(missing_docs)]
     pub hw: u32,
-    pub mode: PowerMode,
+    /// Device measurement mode
+    pub mode: MeasurementMode,
+    #[allow(missing_docs)]
     pub ia: u32,
 }
 
@@ -271,7 +289,7 @@ mod tests {
 
     use crate::types::Metadata;
 
-    use super::{Modifiers, PowerMode};
+    use super::{MeasurementMode, Modifiers};
 
     #[test]
     #[ignore = "assert_eq! doesn't work for floats, need to find another solution"]
@@ -348,7 +366,7 @@ END
             calibrated: false,
             vdd: 3714,
             hw: 9173,
-            mode: PowerMode::Source,
+            mode: MeasurementMode::Source,
             ia: 56,
         };
 

@@ -1,21 +1,20 @@
 #![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 
-use crossbeam::channel::{Receiver, SendError, Sender, TryRecvError};
+use crossbeam::channel::{Receiver, SendError, TryRecvError};
 use measurement::MeasurementAccumulator;
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
-use state::{Idle, Measuring, State};
 use std::{
     borrow::Cow,
     collections::VecDeque,
     io,
-    marker::PhantomData,
     string::FromUtf8Error,
     sync::{Arc, Condvar, Mutex},
     thread,
     time::Duration,
 };
 use thiserror::Error;
-use types::{DevicePower, Metadata, PowerMode, SourceVoltage};
+use types::{DevicePower, MeasurementMode, Metadata, SourceVoltage};
 
 use crate::cmd::Command;
 
@@ -23,34 +22,9 @@ pub mod cmd;
 pub mod measurement;
 pub mod types;
 
-pub mod state {
-    //! Device state definitions, used for typestate setup.
-
-    /// A state that indicates the power mode was set.
-    pub trait Ready: State {}
-    /// General device state. Cannot be implemented by users.
-    pub trait State: Sealed {}
-
-    macro_rules! state {
-        ($state:ident, $doc:literal) => {
-            #[doc = $doc]
-            #[derive(Debug, Clone, Copy, Default)]
-            pub struct $state;
-            impl Sealed for $state {}
-            impl State for $state {}
-        };
-    }
-
-    use self::sealed::Sealed;
-    mod sealed {
-        pub trait Sealed {}
-    }
-
-    state!(Idle, "Device is idle");
-    state!(Measuring, "Device is measuring");
-}
-
 #[derive(Error, Debug)]
+/// PPK2 communication or data parsing error.
+#[allow(missing_docs)]
 pub enum Error {
     #[error("Serial port error: {0}")]
     SerialPort(#[from] serialport::Error),
@@ -64,35 +38,43 @@ pub enum Error {
     Parse(String),
     #[error("Error sending measurement: {0}")]
     SendMeasurement(#[from] SendError<measurement::Result>),
+    #[error("Error sending stop signal: {0}")]
+    SendStopSignal(#[from] SendError<()>),
     #[error("Worker thread signal error: {0}")]
     WorkerSignalError(#[from] TryRecvError),
     #[error("Error deserializeing a measurement: {0:?}")]
     DeserializeMeasurement(Vec<u8>),
 }
 
+#[allow(missing_docs)]
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub struct Ppk2<S: State> {
+/// PPK2 device representation.
+pub struct Ppk2 {
     port: Box<dyn SerialPort>,
     metadata: Metadata,
-    _state: PhantomData<S>,
 }
 
-impl<S: State> Ppk2<S> {
-    pub fn reset(mut self) -> Result<()> {
-        self.send_command(Command::Reset)?;
-        Ok(())
+impl Ppk2 {
+    /// Create a new instance and configure the given [MeasurementMode].
+    pub fn new<'a>(path: impl Into<Cow<'a, str>>, mode: MeasurementMode) -> Result<Self> {
+        let port = serialport::new(path, 9600)
+            .timeout(Duration::from_millis(500))
+            .flow_control(FlowControl::Hardware)
+            .open()?;
+        let mut ppk2 = Self {
+            port,
+            metadata: Metadata::default(),
+        };
+
+        ppk2.metadata = ppk2.get_metadata()?;
+        dbg!(&ppk2.metadata);
+        ppk2.set_power_mode(mode)?;
+        Ok(ppk2)
     }
 
-    fn into_state<T: State>(self) -> Ppk2<T> {
-        Ppk2 {
-            metadata: self.metadata,
-            port: self.port,
-            _state: PhantomData,
-        }
-    }
-
-    fn send_command(&mut self, command: Command) -> Result<Vec<u8>> {
+    /// Send a raw command and return the result.
+    pub fn send_command(&mut self, command: Command) -> Result<Vec<u8>> {
         self.port.write_all(&Vec::from_iter(command.bytes()))?;
         // Doesn't allocate if expected response length is 0
         let mut response = Vec::with_capacity(command.expected_response_len());
@@ -103,46 +85,35 @@ impl<S: State> Ppk2<S> {
         }
         Ok(response)
     }
-}
 
-impl Ppk2<Idle> {
-    pub fn new<'a>(path: impl Into<Cow<'a, str>>, mode: PowerMode) -> Result<Self> {
-        let port = serialport::new(path, 9600)
-            .timeout(Duration::from_millis(500))
-            .flow_control(FlowControl::Hardware)
-            .open()?;
-        let mut ppk2 = Self {
-            port,
-            metadata: Metadata::default(),
-            _state: PhantomData,
-        };
-
-        ppk2.metadata = ppk2.get_metadata()?;
-        ppk2.set_power_mode(mode)?;
-        Ok(ppk2)
-    }
-
+    /// Get the device metadata.
     pub fn get_metadata(&mut self) -> Result<Metadata> {
         let response = self.send_command(Command::GetMetaData)?;
         Metadata::parse(response)
     }
 
+    /// Enable or disable the device power.
     pub fn set_device_power(&mut self, power: DevicePower) -> Result<()> {
         self.send_command(Command::DeviceRunningSet(power))?;
         Ok(())
     }
 
+    /// Set the voltage of the device voltage source.
     pub fn set_source_voltage(&mut self, vdd: SourceVoltage) -> Result<()> {
         self.send_command(Command::RegulatorSet(vdd))?;
         Ok(())
     }
 
+    /// Start measurements. Returns a tuple of:
+    /// - [Ppk2<Measuring>],
+    /// - [Receiver] of [measurement::Result], and
+    /// - A closure that can be called to stop the measurement parsing pipeline and return the
+    /// device.
     pub fn start_measuring(
         mut self,
     ) -> Result<(
-        Ppk2<Measuring>,
         Receiver<measurement::Result>,
-        impl FnOnce() -> std::result::Result<(), SendError<()>>,
+        impl FnOnce() -> Result<Self>,
     )> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
@@ -202,19 +173,24 @@ impl Ppk2<Idle> {
         cvar.notify_all();
 
         self.send_command(Command::AverageStart)?;
-        let stop = move || sig_tx.send(());
-        Ok((self.into_state(), meas_rx, stop))
+
+        let stop = move || {
+            sig_tx.send(())?;
+            self.send_command(Command::AverageStop)?;
+            Ok(self)
+        };
+
+        Ok((meas_rx, stop))
     }
 
-    fn set_power_mode(&mut self, mode: PowerMode) -> Result<()> {
-        self.send_command(Command::SetPowerMode(mode))?;
+    /// Reset the device, making the device unusable.
+    pub fn reset(mut self) -> Result<()> {
+        self.send_command(Command::Reset)?;
         Ok(())
     }
-}
 
-impl Ppk2<Measuring> {
-    pub fn stop_measuring(mut self) -> Result<Ppk2<Idle>> {
-        self.send_command(Command::AverageStop)?;
-        Ok(self.into_state())
+    fn set_power_mode(&mut self, mode: MeasurementMode) -> Result<()> {
+        self.send_command(Command::SetPowerMode(mode))?;
+        Ok(())
     }
 }

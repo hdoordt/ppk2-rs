@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossbeam::channel::RecvTimeoutError;
 use ppk2::{
-    types::{DevicePower, PowerMode, SourceVoltage},
+    types::{DevicePower, MeasurementMode, SourceVoltage},
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
@@ -23,16 +23,18 @@ fn main() -> Result<()> {
         })
         .ok_or(Error::Ppk2NotFound)?;
 
-    let mut ppk2 = Ppk2::new(ppk2_port.port_name, PowerMode::Source)?;
+    let mut ppk2 = Ppk2::new(ppk2_port.port_name, MeasurementMode::Source)?;
 
     ppk2.set_source_voltage(SourceVoltage::from_millivolts(3300))?;
     ppk2.set_device_power(DevicePower::Enabled)?;
-    let (ppk2, rx, kill) = ppk2.start_measuring()?;
+    let (rx, kill) = ppk2.start_measuring()?;
 
     let mut kill = Some(kill);
     let mut data_buf = VecDeque::with_capacity(2048);
 
-    ctrlc::set_handler(move || kill.take().unwrap()().unwrap())?;
+    ctrlc::set_handler(move || {
+        kill.take().unwrap()().unwrap();
+    })?;
     let r: Result<()> = loop {
         let rcv_res = rx.recv_timeout(Duration::from_millis(500));
         match rcv_res {
@@ -59,7 +61,6 @@ fn main() -> Result<()> {
         }
     };
     info!("Stopping measurements and resetting");
-    ppk2.stop_measuring()?.reset()?;
     info!("Goodbye!");
     r
 }
