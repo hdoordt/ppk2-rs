@@ -3,12 +3,12 @@
 
 use measurement::MeasurementAccumulator;
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
+use std::str::Utf8Error;
 use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
 use std::{
     borrow::Cow,
     collections::VecDeque,
     io,
-    string::FromUtf8Error,
     sync::{Arc, Condvar, Mutex},
     thread,
     time::Duration,
@@ -33,7 +33,7 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
     #[error("Utf8 error {0}")]
-    Utf8(#[from] FromUtf8Error),
+    Utf8(#[from] Utf8Error),
     #[error("Parse error in \"{0}\"")]
     Parse(String),
     #[error("Error sending measurement: {0}")]
@@ -88,7 +88,7 @@ impl Ppk2 {
     /// Get the device metadata.
     pub fn get_metadata(&mut self) -> Result<Metadata> {
         let response = self.send_command(Command::GetMetaData)?;
-        Metadata::parse(response)
+        Metadata::from_bytes(&response)
     }
 
     /// Enable or disable the device power.

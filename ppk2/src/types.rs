@@ -1,12 +1,39 @@
 //! Several utility types used to communicate with the device.
 
+use std::{fmt::Display, num::ParseIntError, str::FromStr};
+
 use crate::{Error, Result};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+
+/// Error parsing one of the types defined by this crate.
+#[derive(Debug)]
+pub struct ParseTypeError(String, &'static str);
+
+impl std::error::Error for ParseTypeError {}
+
+impl Display for ParseTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Error parsing: expected one of {}, but got {}",
+            self.1, self.0
+        )
+    }
+}
 
 #[derive(Default, Debug)]
 /// Device source voltage.
 pub struct SourceVoltage {
     raw: [u8; 2],
+}
+
+impl FromStr for SourceVoltage {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mv = s.parse()?;
+        Ok(Self::from_millivolts(mv))
+    }
 }
 
 impl SourceVoltage {
@@ -71,6 +98,21 @@ pub enum MeasurementMode {
     Source = 0x02,
 }
 
+impl FromStr for MeasurementMode {
+    type Err = ParseTypeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "ampere" | "amp" | "a" => Ok(Self::Ampere),
+            "source" | "s" => Ok(Self::Source),
+            _ => Err(ParseTypeError(
+                s.to_owned(),
+                "[ampere | amp | a | source | s]",
+            )),
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(TryFromPrimitive, IntoPrimitive, Debug, Default, Clone, Copy, PartialEq, Eq)]
 /// Device power
@@ -80,6 +122,18 @@ pub enum DevicePower {
     Disabled = 0x00,
     /// Device is enabled
     Enabled = 0x01,
+}
+
+impl FromStr for DevicePower {
+    type Err = ParseTypeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "disabled" | "d" => Ok(Self::Disabled),
+            "enabled" | "e" => Ok(Self::Enabled),
+            _ => Err(ParseTypeError(s.to_owned(), "[disabled | d | enabled | e]")),
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -143,14 +197,13 @@ impl Metadata {
     /// IA: 56
     /// END
     /// ```
-
-    pub fn parse(bytes: Vec<u8>) -> Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         use Error::Parse;
 
         let mut metadata = Metadata::default();
-        let raw_metadata = String::from_utf8(bytes)?;
+        let raw_metadata = std::str::from_utf8(bytes)?;
         if !raw_metadata.ends_with("END\n") {
-            return Err(Parse(raw_metadata));
+            return Err(Parse(raw_metadata.to_owned()));
         }
 
         let lines = raw_metadata.lines();
@@ -337,7 +390,7 @@ IA: 56
 END
 "#;
         let metadata =
-            Metadata::parse(Vec::from(raw_metadata.as_bytes())).expect("Error parsing metadata");
+            Metadata::from_bytes(raw_metadata.as_bytes()).expect("Error parsing metadata");
 
         let expected_modifiers = Modifiers {
             r: [1003.3506, 101.5865, 10.3027, 0.9636, 0.0564],

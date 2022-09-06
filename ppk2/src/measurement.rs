@@ -242,7 +242,7 @@ IA: 56
 END
 "#;
         let metadata =
-            Metadata::parse(Vec::from(raw_metadata.as_bytes())).expect("Error parsing metadata");
+            Metadata::from_bytes(raw_metadata.as_bytes()).expect("Error parsing metadata");
 
         let mut state = AccumulatorState {
             rolling_avg_4: Some(9.478947833765696e-8),
