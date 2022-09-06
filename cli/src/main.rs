@@ -1,11 +1,14 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 use ppk2::{
     types::{DevicePower, MeasurementMode, SourceVoltage},
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use std::{collections::VecDeque, sync::mpsc::RecvTimeoutError, time::Duration};
+use std::{
+    collections::VecDeque, io::Write, path::PathBuf, str::FromStr, sync::mpsc::RecvTimeoutError,
+    time::Duration,
+};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
@@ -19,7 +22,12 @@ struct Args {
     )]
     serial_port: Option<String>,
 
-    #[clap(env, short = 'v', long, help = "The voltage of the device source in mV")]
+    #[clap(
+        env,
+        short = 'v',
+        long,
+        help = "The voltage of the device source in mV"
+    )]
     voltage: SourceVoltage,
 
     #[clap(
@@ -42,6 +50,14 @@ struct Args {
 
     #[clap(env, short = 'l', long, help = "The log level", default_value = "info")]
     log_level: Level,
+
+    #[clap(
+        env,
+        short = 'f',
+        long,
+        help = "The file to write the measurement data to. Please make sure the folder exists, but the file itself does not."
+    )]
+    file: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -52,9 +68,19 @@ fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
+    let log_file_path = args
+        .file;
+    if log_file_path.is_dir() {
+        bail!("Log file path is not a file.");
+    }
+    if log_file_path.exists() {
+        bail!("Log file already exists.")
+    }
+    let mut log_file = std::fs::File::create(log_file_path)?;
+
     let ppk2_port = match args.serial_port {
         Some(p) => p,
-        None => try_find_ppk2_port()?
+        None => try_find_ppk2_port()?,
     };
 
     let mut ppk2 = Ppk2::new(ppk2_port, args.mode)?;
@@ -81,10 +107,17 @@ fn main() -> Result<()> {
                     let sum: f32 = data_buf.iter().sum();
                     let avg = sum / data_buf.len() as f32;
                     debug!("Last: {:.4} μA\tAverage: {avg:.4} μA", m.micro_amps);
+                    writeln!(&mut log_file, "{:.4}", m.micro_amps)?;
                 }
 
                 Err(e) => {
                     warn!("Measurement missed: {e:?}");
+                    writeln!(
+                        &mut log_file,
+                        "?{}-{}",
+                        e.expected_counter.map(|c| c as i16).unwrap_or(-1),
+                        e.actual_counter
+                    )?;
                 }
             },
             Err(RecvTimeoutError::Disconnected) => break Ok(()),
