@@ -1,9 +1,9 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-use crossbeam::channel::{Receiver, SendError, TryRecvError};
 use measurement::MeasurementAccumulator;
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
+use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -68,7 +68,6 @@ impl Ppk2 {
         };
 
         ppk2.metadata = ppk2.get_metadata()?;
-        dbg!(&ppk2.metadata);
         ppk2.set_power_mode(mode)?;
         Ok(ppk2)
     }
@@ -111,23 +110,20 @@ impl Ppk2 {
     /// device.
     pub fn start_measuring(
         mut self,
-    ) -> Result<(
-        Receiver<measurement::Result>,
-        impl FnOnce() -> Result<Self>,
-    )> {
+    ) -> Result<(Receiver<measurement::Result>, impl FnOnce() -> Result<Self>)> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
         // This channel is for sending measurements to the main thread.
-        let (meas_tx, meas_rx) = crossbeam::channel::bounded::<measurement::Result>(1024);
+        let (meas_tx, meas_rx) = mpsc::channel::<measurement::Result>();
         // This channel allows the main thread to notify that the worker thread can stop
         // parsing data.
-        let (sig_tx, sig_rx) = crossbeam::channel::bounded::<()>(0);
+        let (sig_tx, sig_rx) = mpsc::channel::<()>();
 
         let task_ready = ready.clone();
         let mut port = self.port.try_clone()?;
         let metadata = self.metadata.clone();
-        thread::spawn(move || {
+        let t = thread::spawn(move || {
             let r = || -> Result<()> {
                 // Create an accumulator with the current device metadata
                 let mut accumulator = MeasurementAccumulator::new(metadata);
@@ -161,7 +157,7 @@ impl Ppk2 {
             };
             let res = r();
             if let Err(e) = &res {
-                tracing::error!("{:?}", e);
+                tracing::error!("Error fetching measurements: {:?}", e);
             };
             res
         });
@@ -176,6 +172,7 @@ impl Ppk2 {
 
         let stop = move || {
             sig_tx.send(())?;
+            t.join().expect("Data receive thread panicked")?;
             self.send_command(Command::AverageStop)?;
             Ok(self)
         };

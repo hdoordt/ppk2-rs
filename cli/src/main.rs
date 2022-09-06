@@ -1,11 +1,10 @@
 use anyhow::Result;
-use crossbeam::channel::RecvTimeoutError;
 use ppk2::{
     types::{DevicePower, MeasurementMode, SourceVoltage},
     Error, Ppk2,
 };
 use serialport::SerialPortType::UsbPort;
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::mpsc::RecvTimeoutError, time::Duration};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 

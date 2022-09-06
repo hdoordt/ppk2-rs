@@ -12,7 +12,6 @@ categories = ["embedded", "development-tools::profiling"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossbeam = { version = "0.8.2", features = ["crossbeam-channel"] }
 num_enum = "0.5.7"
 serialport = "4.2.0"
 thiserror = "1.0.32"
