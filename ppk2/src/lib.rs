@@ -1,7 +1,7 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-use measurement::MeasurementAccumulator;
+use measurement::{Measurement, MeasurementAccumulator};
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use std::str::Utf8Error;
 use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
@@ -22,6 +22,8 @@ pub mod cmd;
 pub mod measurement;
 pub mod types;
 
+const SPS_MAX: usize = 90_000;
+
 #[derive(Error, Debug)]
 /// PPK2 communication or data parsing error.
 #[allow(missing_docs)]
@@ -37,7 +39,7 @@ pub enum Error {
     #[error("Parse error in \"{0}\"")]
     Parse(String),
     #[error("Error sending measurement: {0}")]
-    SendMeasurement(#[from] SendError<measurement::Result>),
+    SendMeasurement(#[from] SendError<Measurement>),
     #[error("Error sending stop signal: {0}")]
     SendStopSignal(#[from] SendError<()>),
     #[error("Worker thread signal error: {0}")]
@@ -110,12 +112,13 @@ impl Ppk2 {
     /// device.
     pub fn start_measuring(
         mut self,
-    ) -> Result<(Receiver<measurement::Result>, impl FnOnce() -> Result<Self>)> {
+        sps: usize,
+    ) -> Result<(Receiver<measurement::Measurement>, impl FnOnce() -> Result<Self>)> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
         // This channel is for sending measurements to the main thread.
-        let (meas_tx, meas_rx) = mpsc::channel::<measurement::Result>();
+        let (meas_tx, meas_rx) = mpsc::channel::<measurement::Measurement>();
         // This channel allows the main thread to notify that the worker thread can stop
         // parsing data.
         let (sig_tx, sig_rx) = mpsc::channel::<()>();
@@ -123,6 +126,7 @@ impl Ppk2 {
         let task_ready = ready.clone();
         let mut port = self.port.try_clone()?;
         let metadata = self.metadata.clone();
+
         let t = thread::spawn(move || {
             let r = || -> Result<()> {
                 // Create an accumulator with the current device metadata
@@ -135,7 +139,8 @@ impl Ppk2 {
                     .unwrap();
 
                 let mut buf = [0u8; 1024];
-                let mut measurement_buf = VecDeque::with_capacity(100);
+                let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
+                let mut missed = 0;
                 loop {
                     // Check whether the main thread has signaled
                     // us to stop
@@ -147,11 +152,13 @@ impl Ppk2 {
 
                     // Now we read chunks and feed them to the accumulator
                     let n = port.read(&mut buf)?;
-                    accumulator.feed_into(&buf[..n], &mut measurement_buf);
-                    if !measurement_buf.is_empty() {
-                        measurement_buf
-                            .drain(..measurement_buf.len())
-                            .try_for_each(|m| meas_tx.send(m))?;
+                    missed += accumulator.feed_into(&buf[..n], &mut measurement_buf);
+                    let len = measurement_buf.len();
+                    if len >= SPS_MAX / sps {
+                        let sum: f32 = measurement_buf.drain(..).map(|m| m.micro_amps).sum();
+                        let avg = sum / (len - missed) as f32;
+                        meas_tx.send(Measurement { micro_amps: avg })?;
+                        missed = 0;
                     }
                 }
             };

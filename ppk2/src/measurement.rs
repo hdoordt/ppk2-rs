@@ -4,18 +4,6 @@ use std::collections::VecDeque;
 
 use crate::types::Metadata;
 
-#[derive(Clone, Debug)]
-/// Indicates that one or more measurements were missed.
-pub struct MeasurementMissed {
-    /// The counter that was expected to come with this measurement
-    pub expected_counter: Option<u8>,
-    /// The actual counter
-    pub actual_counter: u8,
-}
-
-/// A Result type that encapsulates either a [Measurement] or [MeasurementMissed].
-pub type Result = std::result::Result<Measurement, MeasurementMissed>;
-
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
 const SPIKE_FILTER_ALPHA: f32 = 0.18;
 const SPIKE_FILTER_ALPHA_5: f32 = 0.06;
@@ -24,8 +12,6 @@ const SPIKE_FILTER_SAMPLES: isize = 3;
 #[derive(Debug)]
 /// A single parsed measurement
 pub struct Measurement {
-    /// The measurement counter. Wraps at 64.
-    pub counter: u8,
     /// The measured current in mA.
     pub micro_amps: f32,
 }
@@ -69,15 +55,16 @@ impl MeasurementAccumulator {
 
     /// Feed a number of bytes to the accumulator, pushing the [Result]s into the
     /// passed ring buffer.
-    pub fn feed_into(&mut self, bytes: &[u8], buf: &mut VecDeque<Result>) {
+    pub fn feed_into(&mut self, bytes: &[u8], buf: &mut VecDeque<Measurement>) -> usize {
         if bytes.is_empty() {
-            return;
+            return 0;
         }
         self.buf.extend_from_slice(bytes);
         let end = self.buf.len() - self.buf.len() % 4;
         let chunks = self.buf[..end]
             .chunks_exact(4)
             .map(|c| c.try_into().unwrap());
+        let mut samples_missed = 0;
         for chunk in chunks {
             let raw = u32::from_le_bytes(chunk);
             let current_measurement_range = get_range(raw).min(4) as usize;
@@ -86,12 +73,14 @@ impl MeasurementAccumulator {
             let prev_expected_counter = self.state.expected_counter;
             // Wrap at 63 + 1
             self.state.expected_counter.replace((counter + 1) & 0x3F);
-            if prev_expected_counter != Some(counter) {
-                buf.push_back(Err(MeasurementMissed {
-                    expected_counter: prev_expected_counter,
-                    actual_counter: counter,
-                }));
-                continue;
+            if let Some(prev_count) = prev_expected_counter {
+                if prev_count < counter {
+                    samples_missed += (counter - prev_count) as usize;
+                    continue;
+                } else if prev_expected_counter > Some(counter) {
+                    samples_missed += (prev_count - counter) as usize;
+                    continue;
+                }
             }
 
             let adc_result = get_adc(raw) * 4;
@@ -106,12 +95,10 @@ impl MeasurementAccumulator {
                 self.state.expected_counter.replace(counter);
             }
 
-            buf.push_back(Ok(Measurement {
-                counter,
-                micro_amps,
-            }))
+            buf.push_back(Measurement { micro_amps })
         }
         self.buf.drain(..end);
+        samples_missed
     }
 }
 
