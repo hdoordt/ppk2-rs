@@ -27,7 +27,8 @@ struct Args {
         env,
         short = 'v',
         long,
-        help = "The voltage of the device source in mV"
+        help = "The voltage of the device source in mV",
+        default_value = "0"
     )]
     voltage: SourceVoltage,
 
@@ -56,7 +57,8 @@ struct Args {
         env,
         short = 's',
         long,
-        help = "The maximum number of samples to be taken per second. Uses averaging of device samples Samples are analyzed in chunks, and as such the actual number of samples per second will deviate"
+        help = "The maximum number of samples to be taken per second. Uses averaging of device samples Samples are analyzed in chunks, and as such the actual number of samples per second will deviate",
+        default_value = "100"
     )]
     sps: usize,
 }
