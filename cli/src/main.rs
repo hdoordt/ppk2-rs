@@ -2,15 +2,14 @@ use anyhow::Result;
 use clap::Parser;
 use ppk2::{
     types::{DevicePower, MeasurementMode, SourceVoltage},
-    Error, Ppk2,
+    Ppk2, try_find_ppk2_port,
 };
-use serialport::SerialPortType::UsbPort;
+
 use std::{
-    collections::VecDeque,
     sync::mpsc::RecvTimeoutError,
     time::{Duration, Instant},
 };
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
@@ -112,16 +111,4 @@ fn main() -> Result<()> {
     info!("Stopping measurements and resetting");
     info!("Goodbye!");
     r
-}
-
-/// Try to find the serial port the PPK2 is connected to.
-fn try_find_ppk2_port() -> Result<String> {
-    Ok(serialport::available_ports()?
-        .into_iter()
-        .find(|p| match &p.port_type {
-            UsbPort(usb) => usb.vid == 0x1915 && usb.pid == 0xc00a,
-            _ => false,
-        })
-        .ok_or(Error::Ppk2NotFound)?
-        .port_name)
 }

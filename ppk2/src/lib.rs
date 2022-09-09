@@ -1,7 +1,7 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-use measurement::{Measurement, MeasurementAccumulator};
+use measurement::{Measurement, MeasurementAccumulator, MeasurementIterExt};
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use std::str::Utf8Error;
 use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
@@ -155,9 +155,8 @@ impl Ppk2 {
                     missed += accumulator.feed_into(&buf[..n], &mut measurement_buf);
                     let len = measurement_buf.len();
                     if len >= SPS_MAX / sps {
-                        let sum: f32 = measurement_buf.drain(..).map(|m| m.micro_amps).sum();
-                        let avg = sum / (len - missed) as f32;
-                        meas_tx.send(Measurement { micro_amps: avg })?;
+                        let measurement = measurement_buf.drain(..).combine(missed);                        
+                        meas_tx.send(measurement)?;
                         missed = 0;
                     }
                 }
@@ -197,4 +196,18 @@ impl Ppk2 {
         self.send_command(Command::SetPowerMode(mode))?;
         Ok(())
     }
+}
+
+/// Try to find the serial port the PPK2 is connected to.
+pub fn try_find_ppk2_port() -> Result<String> {
+    use serialport::SerialPortType::UsbPort;
+
+    Ok(serialport::available_ports()?
+        .into_iter()
+        .find(|p| match &p.port_type {
+            UsbPort(usb) => usb.vid == 0x1915 && usb.pid == 0xc00a,
+            _ => false,
+        })
+        .ok_or(Error::Ppk2NotFound)?
+        .port_name)
 }

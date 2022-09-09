@@ -9,7 +9,6 @@ authors = ["Henk Oordt <hd@oordt.dev>"]
 [dependencies]
 anyhow = { version = "1.0.60", features = ["backtrace"] }
 ctrlc = "3.2.2"
-serialport = "4.2.0"
 tracing = "0.1.36"
 tracing-subscriber = "0.3.15"
 clap = { version = "3.2.20", features = ["derive", "env"] }

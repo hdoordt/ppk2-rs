@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::types::Metadata;
+use crate::types::{Metadata, LogicPortPins};
 
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
 const SPIKE_FILTER_ALPHA: f32 = 0.18;
@@ -14,6 +14,8 @@ const SPIKE_FILTER_SAMPLES: isize = 3;
 pub struct Measurement {
     /// The measured current in mA.
     pub micro_amps: f32,
+    /// Logic port bits
+    pub pins: LogicPortPins,
 }
 
 struct AccumulatorState {
@@ -84,7 +86,7 @@ impl MeasurementAccumulator {
             }
 
             let adc_result = get_adc(raw) * 4;
-            let _bits = get_logic(raw);
+            let bits = get_logic(raw).into();
             let micro_amps = get_adc_result(
                 &self.metadata,
                 &mut self.state,
@@ -95,7 +97,7 @@ impl MeasurementAccumulator {
                 self.state.expected_counter.replace(counter);
             }
 
-            buf.push_back(Measurement { micro_amps })
+            buf.push_back(Measurement { micro_amps, pins: bits })
         }
         self.buf.drain(..end);
         samples_missed
@@ -158,6 +160,43 @@ fn get_adc_result(
     }
     state.prev_range = Some(range);
     adc
+}
+
+/// Extension trait for VecDeque<Measurement>
+pub trait MeasurementIterExt {
+    /// Combine items into a single [Measurement]. T
+    fn combine(self, missed: usize) -> Measurement;
+}
+
+impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
+    fn combine(self, missed: usize) -> Measurement {
+        let mut pin_high_count = [0usize; 8];
+        let mut count = 0;
+        let mut sum = 0f32;
+        self.for_each(|m| {
+            count += 1;
+            sum += m.micro_amps;
+            m.pins
+                .inner()
+                .iter()
+                .enumerate()
+                .filter(|(_, &p)| p)
+                .for_each(|(i, _)| pin_high_count[i] += 1);
+        });
+
+        let mut pins = [false; 8];
+        pin_high_count
+            .into_iter()
+            .enumerate()
+            .filter(|(_, p)| *p > count / 2)
+            .for_each(|(i, _)| pins[i] = true);
+        let avg = sum / (count - missed) as f32;
+
+        Measurement {
+            micro_amps: avg,
+            pins: pins.into(),
+        }
+    }
 }
 
 const fn generate_mask(bits: u32, pos: u32) -> u32 {

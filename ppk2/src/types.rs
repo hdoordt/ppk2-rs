@@ -136,6 +136,52 @@ impl FromStr for DevicePower {
     }
 }
 
+/// Logic port state
+#[derive(Debug, Clone, Copy)]
+pub struct LogicPortPins {
+    pins: [bool; 8],
+}
+
+impl LogicPortPins {
+    /// Check whether a pin level is high
+    pub fn pin_is_high(&self, pin: usize) -> bool {
+        assert!(pin < 8);
+        self.pins[pin]
+    }
+
+    /// Check whether a pin level is low
+    pub fn pin_is_low(&self, pin: usize) -> bool {
+        !self.pin_is_high(pin)
+    }
+
+    /// Get a reference to the internal pin array
+    pub fn inner(&self) -> &[bool; 8] {
+        &self.pins
+    }
+}
+
+impl From<[bool; 8]> for LogicPortPins {
+    fn from(pins: [bool; 8]) -> Self {
+        Self { pins }
+    }
+}
+
+impl From<u8> for LogicPortPins {
+    fn from(inner: u8) -> Self {
+        let mut pins = [false; 8];
+        for (i, pin) in pins.iter_mut().enumerate() {
+            *pin = inner & 1 << i != 0
+        }
+        pins.into()
+    }
+}
+
+impl From<u32> for LogicPortPins {
+    fn from(v: u32) -> Self {
+        (v as u8).into()
+    }
+}
+
 #[derive(Default, Debug, Clone, PartialEq)]
 /// parsed device metadata
 pub struct Metadata {
