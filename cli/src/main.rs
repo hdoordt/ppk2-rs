@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use ppk2::{
-    types::{DevicePower, MeasurementMode, SourceVoltage},
+    types::{DevicePower, MeasurementMode, SourceVoltage, LogicPortPins, Level},
     Ppk2, try_find_ppk2_port,
 };
 
@@ -9,7 +9,7 @@ use std::{
     sync::mpsc::RecvTimeoutError,
     time::{Duration, Instant},
 };
-use tracing::{debug, error, info, Level};
+use tracing::{debug, error, info, Level as LogLevel};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
@@ -50,7 +50,7 @@ struct Args {
     mode: MeasurementMode,
 
     #[clap(env, short = 'l', long, help = "The log level", default_value = "info")]
-    log_level: Level,
+    log_level: LogLevel,
 
     #[clap(
         env,
@@ -79,7 +79,10 @@ fn main() -> Result<()> {
 
     ppk2.set_source_voltage(args.voltage)?;
     ppk2.set_device_power(args.power)?;
-    let (rx, kill) = ppk2.start_measuring(args.sps)?;
+    let mut levels = [Level::Either; 8];
+    levels[0] = Level::Low;
+    let pins = LogicPortPins::with_levels(levels);
+    let (rx, kill) = ppk2.start_measuring_while_matches(pins, args.sps)?;
 
     let mut kill = Some(kill);
 

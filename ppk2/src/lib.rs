@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use types::{DevicePower, MeasurementMode, Metadata, SourceVoltage};
+use types::{DevicePower, LogicPortPins, MeasurementMode, Metadata, SourceVoltage};
 
 use crate::cmd::Command;
 
@@ -110,10 +110,14 @@ impl Ppk2 {
     /// - [Receiver] of [measurement::Result], and
     /// - A closure that can be called to stop the measurement parsing pipeline and return the
     /// device.
-    pub fn start_measuring(
+    pub fn start_measuring_while_matches(
         mut self,
+        pins: LogicPortPins,
         sps: usize,
-    ) -> Result<(Receiver<measurement::Measurement>, impl FnOnce() -> Result<Self>)> {
+    ) -> Result<(
+        Receiver<measurement::Measurement>,
+        impl FnOnce() -> Result<Self>,
+    )> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
@@ -141,6 +145,7 @@ impl Ppk2 {
                 let mut buf = [0u8; 1024];
                 let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
                 let mut missed = 0;
+                let mut did_get_matches = false;
                 loop {
                     // Check whether the main thread has signaled
                     // us to stop
@@ -155,8 +160,18 @@ impl Ppk2 {
                     missed += accumulator.feed_into(&buf[..n], &mut measurement_buf);
                     let len = measurement_buf.len();
                     if len >= SPS_MAX / sps {
-                        let measurement = measurement_buf.drain(..).combine(missed);                        
-                        meas_tx.send(measurement)?;
+                        let measurement = measurement_buf.drain(..).combine_matching(missed, pins);
+                        match measurement {
+                            Some(m) => {
+                                meas_tx.send(m)?;
+                                did_get_matches = true;
+                            }
+                            None if did_get_matches => {
+                                break Ok(());
+                            },
+                            _ => {/* No matching measurements yet, wait for them to come up */},
+                        }
+
                         missed = 0;
                     }
                 }

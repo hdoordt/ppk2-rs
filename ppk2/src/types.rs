@@ -136,17 +136,65 @@ impl FromStr for DevicePower {
     }
 }
 
+/// Logic level for logic port pins
+#[derive(Debug, Clone, Copy)]
+pub enum Level {
+    /// Low level
+    Low,
+    /// High level
+    High,
+    /// Either level. Used for matching only.
+    Either,
+}
+
+impl From<bool> for Level {
+    fn from(level: bool) -> Self {
+        use Level::*;
+        match level {
+            true => High,
+            false => Low,
+        }
+    }
+}
+
+impl Level {
+    /// Check whether the level is high.
+    pub fn is_high(&self) -> bool {
+        matches!(self, Level::High)
+    }
+
+    /// Check whether the level is low.
+    pub fn is_low(&self) -> bool {
+        matches!(self, Level::Low)
+    }
+
+    /// Check whether the [Level] matches another.
+    pub fn matches(&self, other: Level) -> bool {
+        match (self, other) {
+            (_, Level::Either) => true,
+            (Level::Either, _) => true,
+            (Level::Low, Level::Low) => true,
+            (Level::High, Level::High) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Logic port state
 #[derive(Debug, Clone, Copy)]
 pub struct LogicPortPins {
-    pins: [bool; 8],
+    pin_levels: [Level; 8],
 }
 
 impl LogicPortPins {
+    /// Set up a new [LogicPortPins] with given [Level]s
+    pub fn with_levels(pin_levels: [Level; 8]) -> Self {
+        Self { pin_levels }
+    }
+
     /// Check whether a pin level is high
     pub fn pin_is_high(&self, pin: usize) -> bool {
-        assert!(pin < 8);
-        self.pins[pin]
+        self.pin_levels[pin].is_high()
     }
 
     /// Check whether a pin level is low
@@ -155,14 +203,18 @@ impl LogicPortPins {
     }
 
     /// Get a reference to the internal pin array
-    pub fn inner(&self) -> &[bool; 8] {
-        &self.pins
+    pub fn inner(&self) -> &[Level; 8] {
+        &self.pin_levels
     }
 }
 
 impl From<[bool; 8]> for LogicPortPins {
-    fn from(pins: [bool; 8]) -> Self {
-        Self { pins }
+    fn from(pin_bools: [bool; 8]) -> Self {
+        let mut pins = [Level::Low; 8];
+        pin_bools.iter().enumerate().for_each(|(i, &p)| {
+            pins[i] = p.into();
+        });
+        Self { pin_levels: pins }
     }
 }
 
