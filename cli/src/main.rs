@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use ppk2::{
     types::{DevicePower, MeasurementMode, SourceVoltage, LogicPortPins, Level},
-    Ppk2, try_find_ppk2_port,
+    Ppk2, try_find_ppk2_port, measurement::MeasurementMatch,
 };
 
 use std::{
@@ -94,13 +94,13 @@ fn main() -> Result<()> {
     let r: Result<()> = loop {
         let rcv_res = rx.recv_timeout(Duration::from_millis(2000));
         count += 1;
-        let now = Instant::now();
-        if now.duration_since(start) > Duration::from_secs(10) {
-            break Ok(());
-        }
+        use MeasurementMatch::*;
         match rcv_res {
-            Ok(m) => {
+            Ok(Match(m)) => {
                 debug!("Last: {:.4} μA", m.micro_amps);
+            }
+            Ok(NoMatch) => {
+                debug!("No match");
             }
             Err(RecvTimeoutError::Disconnected) => break Ok(()),
             Err(e) => {

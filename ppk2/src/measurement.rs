@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::types::{LogicPortPins, Metadata};
+use crate::{types::{LogicPortPins, Metadata}};
 
 const ADC_MULTIPLIER: f32 = 1.8 / 163840.;
 const SPIKE_FILTER_ALPHA: f32 = 0.18;
@@ -86,7 +86,7 @@ impl MeasurementAccumulator {
             }
 
             let adc_result = get_adc(raw) * 4;
-            let bits = get_logic(raw).into();
+            let pins = get_logic(raw).into();
             let micro_amps = get_adc_result(
                 &self.metadata,
                 &mut self.state,
@@ -99,7 +99,7 @@ impl MeasurementAccumulator {
 
             buf.push_back(Measurement {
                 micro_amps,
-                pins: bits,
+                pins,
             })
         }
         self.buf.drain(..end);
@@ -165,17 +165,27 @@ fn get_adc_result(
     adc
 }
 
+
+/// Indicates whether a set of [Measurement]s matched
+#[derive(Debug)]
+pub enum MeasurementMatch {
+    /// A set of [Measurement]s did match
+    Match(Measurement),
+    /// No matching [Measurement]s in the last chunk
+    NoMatch,
+}
+
 /// Extension trait for VecDeque<Measurement>
 pub trait MeasurementIterExt {
     /// Combine items into a single [Measurement], if there are items.
-    fn combine(self, missed: usize) -> Option<Measurement>;
+    fn combine(self, missed: usize) -> MeasurementMatch;
 
     /// Combine items with matching logic port pins into a single [Measurement], if any.
-    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> Option<Measurement>;
+    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> MeasurementMatch;
 }
 
 impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
-    fn combine(self, missed: usize) -> Option<Measurement> {
+    fn combine(self, missed: usize) -> MeasurementMatch {
         let mut pin_high_count = [0usize; 8];
         let mut count = 0;
         let mut sum = 0f32;
@@ -192,7 +202,7 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
 
         if count == 0 {
             // No measurements
-            return None;
+            return MeasurementMatch::NoMatch;
         }
 
         let mut pins = [false; 8];
@@ -203,13 +213,13 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
             .for_each(|(i, _)| pins[i] = true);
         let avg = sum / (count - missed) as f32;
 
-        Some(Measurement {
+        MeasurementMatch::Match(Measurement {
             micro_amps: avg,
             pins: pins.into(),
         })
     }
 
-    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> Option<Measurement> {
+    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> MeasurementMatch {
         let iter = self.filter(|m| {
             m.pins
                 .inner()

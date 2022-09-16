@@ -1,7 +1,7 @@
 #![doc = include_str!("../../README.md")]
 #![deny(missing_docs)]
 
-use measurement::{Measurement, MeasurementAccumulator, MeasurementIterExt};
+use measurement::{Measurement, MeasurementAccumulator, MeasurementIterExt, MeasurementMatch};
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use std::str::Utf8Error;
 use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
@@ -39,7 +39,7 @@ pub enum Error {
     #[error("Parse error in \"{0}\"")]
     Parse(String),
     #[error("Error sending measurement: {0}")]
-    SendMeasurement(#[from] SendError<Measurement>),
+    SendMeasurement(#[from] SendError<MeasurementMatch>),
     #[error("Error sending stop signal: {0}")]
     SendStopSignal(#[from] SendError<()>),
     #[error("Worker thread signal error: {0}")]
@@ -114,15 +114,12 @@ impl Ppk2 {
         mut self,
         pins: LogicPortPins,
         sps: usize,
-    ) -> Result<(
-        Receiver<measurement::Measurement>,
-        impl FnOnce() -> Result<Self>,
-    )> {
+    ) -> Result<(Receiver<MeasurementMatch>, impl FnOnce() -> Result<Self>)> {
         // Stuff needed to communicate with the main thread
         // ready allows main thread to signal worker when serial input buf is cleared.
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
         // This channel is for sending measurements to the main thread.
-        let (meas_tx, meas_rx) = mpsc::channel::<measurement::Measurement>();
+        let (meas_tx, meas_rx) = mpsc::channel::<MeasurementMatch>();
         // This channel allows the main thread to notify that the worker thread can stop
         // parsing data.
         let (sig_tx, sig_rx) = mpsc::channel::<()>();
@@ -145,7 +142,6 @@ impl Ppk2 {
                 let mut buf = [0u8; 1024];
                 let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
                 let mut missed = 0;
-                let mut did_get_matches = false;
                 loop {
                     // Check whether the main thread has signaled
                     // us to stop
@@ -161,17 +157,7 @@ impl Ppk2 {
                     let len = measurement_buf.len();
                     if len >= SPS_MAX / sps {
                         let measurement = measurement_buf.drain(..).combine_matching(missed, pins);
-                        match measurement {
-                            Some(m) => {
-                                meas_tx.send(m)?;
-                                did_get_matches = true;
-                            }
-                            None if did_get_matches => {
-                                break Ok(());
-                            },
-                            _ => {/* No matching measurements yet, wait for them to come up */},
-                        }
-
+                        meas_tx.send(measurement)?;
                         missed = 0;
                     }
                 }

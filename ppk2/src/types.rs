@@ -137,13 +137,14 @@ impl FromStr for DevicePower {
 }
 
 /// Logic level for logic port pins
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Level {
     /// Low level
     Low,
     /// High level
     High,
     /// Either level. Used for matching only.
+    #[default]
     Either,
 }
 
@@ -181,12 +182,18 @@ impl Level {
 }
 
 /// Logic port state
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct LogicPortPins {
     pin_levels: [Level; 8],
 }
 
 impl LogicPortPins {
+    /// Set a pin level
+    pub fn set_level(mut self, pin: usize, level: Level) -> Self {
+        self.pin_levels[pin] = level;
+        self
+    }
+
     /// Set up a new [LogicPortPins] with given [Level]s
     pub fn with_levels(pin_levels: [Level; 8]) -> Self {
         Self { pin_levels }
