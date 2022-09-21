@@ -177,10 +177,16 @@ pub enum MeasurementMatch {
 
 /// Extension trait for VecDeque<Measurement>
 pub trait MeasurementIterExt {
-    /// Combine items into a single [Measurement], if there are items.
+    /// Combine items into a single [MeasurementMatch::Match], if there are items.
+    /// If there are none, [MeasurementMatch::NoMatch] is returned.
+    /// Set combined logic port pin high if and only if more than half
+    /// of the measurements indicate the pin was high
     fn combine(self, missed: usize) -> MeasurementMatch;
 
-    /// Combine items with matching logic port pins into a single [Measurement], if any.
+    /// Combine items with matching logic port state into a single [MeasurementMatch::Match],
+    /// if there are items. If there are none, [MeasurementMatch::NoMatch] is returned.
+    /// Set combined logic port pin high if and only if more than half
+    /// of the measurements indicate the pin was high
     fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> MeasurementMatch;
 }
 
@@ -205,6 +211,8 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
             return MeasurementMatch::NoMatch;
         }
 
+        // Set combined pin high if and only if more than half
+        // of the measurements indicate the pin was high
         let mut pins = [false; 8];
         pin_high_count
             .into_iter()
