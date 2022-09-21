@@ -1,7 +1,7 @@
-#![doc = include_str!("../../README.md")]
+#![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 
-use measurement::{Measurement, MeasurementAccumulator, MeasurementIterExt, MeasurementMatch};
+use measurement::{MeasurementAccumulator, MeasurementIterExt, MeasurementMatch};
 use serialport::{ClearBuffer::Input, FlowControl, SerialPort};
 use std::str::Utf8Error;
 use std::sync::mpsc::{self, Receiver, SendError, TryRecvError};
@@ -107,10 +107,22 @@ impl Ppk2 {
 
     /// Start measurements. Returns a tuple of:
     /// - [Ppk2<Measuring>],
+    /// - [Receiver] of [measurement::MeasurementMatch], and
+    /// - A closure that can be called to stop the measurement parsing pipeline and return the
+    /// device.
+    pub fn start_measurement(
+        self,
+        sps: usize,
+    ) -> Result<(Receiver<MeasurementMatch>, impl FnOnce() -> Result<Self>)> {
+        self.start_measurement_matching(LogicPortPins::default(), sps)
+    }
+
+    /// Start measurements. Returns a tuple of:
+    /// - [Ppk2<Measuring>],
     /// - [Receiver] of [measurement::Result], and
     /// - A closure that can be called to stop the measurement parsing pipeline and return the
     /// device.
-    pub fn start_measuring_while_matches(
+    pub fn start_measurement_matching(
         mut self,
         pins: LogicPortPins,
         sps: usize,

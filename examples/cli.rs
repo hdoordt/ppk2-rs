@@ -63,6 +63,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    // Setup stuff
     let args = Args::parse();
 
     let subscriber = FmtSubscriber::builder()
@@ -75,20 +76,28 @@ fn main() -> Result<()> {
         None => try_find_ppk2_port()?,
     };
 
+    // Connect to PPK2 and initialize
     let mut ppk2 = Ppk2::new(ppk2_port, args.mode)?;
-
     ppk2.set_source_voltage(args.voltage)?;
     ppk2.set_device_power(args.power)?;
+
+    // Set up pin pattern for matching
+    // This particular setup will only
+    // match measurements if pin 0 is low.
     let mut levels = [Level::Either; 8];
     levels[0] = Level::Low;
     let pins = LogicPortPins::with_levels(levels);
-    let (rx, kill) = ppk2.start_measuring_while_matches(pins, args.sps)?;
 
+    // Start measuring.
+    let (rx, kill) = ppk2.start_measurement_matching(pins, args.sps)?;
+
+    // Set up sigkill handler.
     let mut kill = Some(kill);
-
     ctrlc::set_handler(move || {
         kill.take().unwrap()().unwrap();
     })?;
+
+    // Receive measurements
     let mut count = 0usize;
     let start = Instant::now();
     let r: Result<()> = loop {
@@ -97,10 +106,10 @@ fn main() -> Result<()> {
         use MeasurementMatch::*;
         match rcv_res {
             Ok(Match(m)) => {
-                debug!("Last: {:.4} μA", m.micro_amps);
+                debug!("Last chunk average: {:.4} μA", m.micro_amps);
             }
             Ok(NoMatch) => {
-                debug!("No match");
+                debug!("No match in the last chunk of measurements");
             }
             Err(RecvTimeoutError::Disconnected) => break Ok(()),
             Err(e) => {
