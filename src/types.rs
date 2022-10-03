@@ -21,7 +21,7 @@ impl Display for ParseTypeError {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 /// Device source voltage.
 pub struct SourceVoltage {
     raw: [u8; 2],
