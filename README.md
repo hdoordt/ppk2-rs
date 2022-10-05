@@ -10,4 +10,4 @@ To install, run:
 cargo install ppk2-cli
 ```
 
-If you want to use this crate as a library, you can take inspiration from [`src/main.rs`](src/main.rs) to get an idea of how to use it.
+If you want to use this crate as a library, you can take inspiration from [`examples/cli.rs`](examples/cli.rs) to get an idea of how to use it.
