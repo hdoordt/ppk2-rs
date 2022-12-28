@@ -60,10 +60,20 @@ pub struct Ppk2 {
 impl Ppk2 {
     /// Create a new instance and configure the given [MeasurementMode].
     pub fn new<'a>(path: impl Into<Cow<'a, str>>, mode: MeasurementMode) -> Result<Self> {
-        let port = serialport::new(path, 9600)
+        let mut port = serialport::new(path, 9600)
             .timeout(Duration::from_millis(500))
             .flow_control(FlowControl::Hardware)
             .open()?;
+
+        if let Err(e) = port.clear(serialport::ClearBuffer::All) {
+            tracing::warn!("failed to clear buffers: {:?}", e);
+        }
+
+        // Required to work on Windows.
+        if let Err(e) = port.write_data_terminal_ready(true) {
+            tracing::warn!("failed to set DTR: {:?}", e);
+        }
+
         let mut ppk2 = Self {
             port,
             metadata: Metadata::default(),
