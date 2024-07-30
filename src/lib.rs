@@ -97,10 +97,29 @@ impl Ppk2 {
         Ok(response)
     }
 
-    /// Get the device metadata.
-    pub fn get_metadata(&mut self) -> Result<Metadata> {
+    fn try_get_metadata(&mut self) -> Result<Metadata> {
         let response = self.send_command(Command::GetMetaData)?;
         Metadata::from_bytes(&response)
+    }
+
+    /// Get the device metadata.
+    pub fn get_metadata(&mut self) -> Result<Metadata> {
+        let mut result: Result<Metadata> = Err(Error::Parse("Metadata".to_string()));
+
+        // Retry a few times, as the metadata command sometimes fails
+        for _ in 0..3 {
+            match self.try_get_metadata() {
+                Ok(metadata) => {
+                    result = Ok(metadata);
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!("Error fetching metadata: {:?}. Retrying..", e);
+                }
+            }
+        }
+
+        result
     }
 
     /// Enable or disable the device power.
