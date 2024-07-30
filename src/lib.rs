@@ -22,7 +22,7 @@ pub mod cmd;
 pub mod measurement;
 pub mod types;
 
-const SPS_MAX: usize = 90_000;
+const SPS_MAX: usize = 100_000;
 
 #[derive(Error, Debug)]
 /// PPK2 communication or data parsing error.
@@ -161,7 +161,13 @@ impl Ppk2 {
                     .wait_while(lock.lock().unwrap(), |ready| !*ready)
                     .unwrap();
 
-                let mut buf = [0u8; 1024];
+                /* 4 bytes is the size of a single sample, and the PPK pushes 100,000 samples per second.
+                   Having size of `buf` at eg.1024 blocks port.read() until the buffer is full with 1024 bytes (128 samples).
+                   The measurement returned will be the average of the 128 samples. But we want to get every single sample when
+                   requested sps is 100,000. Hence, we set the buffer size to 4 bytes, and read the port in a loop,
+                   feeding the accumulator with the data.
+                */
+                let mut buf = [0u8; 4];
                 let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
                 let mut missed = 0;
                 loop {
