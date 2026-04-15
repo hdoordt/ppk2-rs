@@ -1,8 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use ppk2::{
-    types::{DevicePower, MeasurementMode, SourceVoltage, LogicPortPins, Level},
-    Ppk2, try_find_ppk2_port, measurement::MeasurementMatch,
+    measurement::MeasurementMatch,
+    try_find_ppk2_port,
+    types::{DevicePower, Level, LogicPortPins, MeasurementMode, SourceVoltage},
+    Ppk2,
 };
 
 use std::{
@@ -94,7 +96,12 @@ fn main() -> Result<()> {
     // Set up sigkill handler.
     let mut kill = Some(kill);
     ctrlc::set_handler(move || {
-        kill.take().unwrap()().unwrap();
+        info!("Ctrl+C received");
+        if let Some(kill) = kill.take() {
+            if let Err(e) = kill() {
+                error!("Error ending PPK2 measurements: {}", e);
+            }
+        }
     })?;
 
     // Receive measurements
