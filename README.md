@@ -4,10 +4,26 @@ Rust library and CLI for working with Nordic Semiconductor's Power Profiler Kit 
 
 Heavily based on [nrfconnect-ppk](https://github.com/NordicSemiconductor/pc-nrfconnect-ppk) and its derivate [ppk2-api-python](https://github.com/IRNAS/ppk2-api-python).
 
-To install, run:
-
+## Usage
+In any case, please make sure to install the required `udev` rules first by running
+```sh
+./setup-udev.sh
 ```
-cargo install ppk2-cli
+
+### Using the CLI
+If you want to quickly take some measurements, you can execute the `cli` example.
+
+To get an overview of its arguments, run
+```sh
+cargo run --example cli -- --help
 ```
 
-If you want to use this crate as a library, you can take inspiration from [`examples/cli.rs`](examples/cli.rs) to get an idea of how to use it.
+### Using as a library
+Simply add `ppk2` as a dependency in `Cargo.toml`:
+
+```toml
+[dependencies]
+ppk2 = "<replace-with-version>"
+```
+
+Please refer to [`examples/cli.rs`](examples/cli.rs) to get an idea of how to use it.
