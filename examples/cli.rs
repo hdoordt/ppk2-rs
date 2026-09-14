@@ -60,6 +60,15 @@ struct Args {
         default_value = "100"
     )]
     sps: usize,
+
+    #[clap(
+        long,
+        help = "Statistics mode: sample at the full 100 kS/s (ignores --sps) and print average/RMS/min/max/charge once per interval"
+    )]
+    stats: bool,
+
+    #[clap(env, short = 'i', long, help = "Statistics mode interval in ms", default_value = "1000")]
+    interval_ms: u64,
 }
 
 fn main() -> Result<()> {
@@ -80,6 +89,12 @@ fn main() -> Result<()> {
     let mut ppk2 = Ppk2::new(ppk2_port, args.mode)?;
     ppk2.set_source_voltage(args.voltage)?;
     ppk2.set_device_power(args.power)?;
+
+    if args.stats {
+        // The source voltage is only known (and regulated) when sourcing
+        let source_mv = (args.mode == MeasurementMode::Source).then(|| args.voltage.millivolts());
+        return run_stats(ppk2, args.interval_ms, source_mv);
+    }
 
     // Set up pin pattern for matching
     // This particular setup will only
@@ -123,4 +138,93 @@ fn main() -> Result<()> {
     info!("Stopping measurements and resetting");
     info!("Goodbye!");
     r
+}
+
+/// Current statistics over one interval of samples
+#[derive(Default)]
+struct Stats {
+    count: u64,
+    sum: f64,
+    sum_sq: f64,
+    min: f32,
+    max: f32,
+}
+
+impl Stats {
+    fn add(&mut self, micro_amps: f32) {
+        if self.count == 0 {
+            self.min = micro_amps;
+            self.max = micro_amps;
+        }
+        let i = f64::from(micro_amps);
+        self.count += 1;
+        self.sum += i;
+        self.sum_sq += i * i;
+        self.min = self.min.min(micro_amps);
+        self.max = self.max.max(micro_amps);
+    }
+}
+
+/// Formats a power in µW with a fitting unit (µW, mW or W)
+fn format_power(micro_watts: f64) -> String {
+    if micro_watts >= 1e6 {
+        format!("{:.3} W", micro_watts / 1e6)
+    } else if micro_watts >= 1e3 {
+        format!("{:.3} mW", micro_watts / 1e3)
+    } else {
+        format!("{micro_watts:.3} µW")
+    }
+}
+
+/// Sample at the full rate and print average/RMS/min/max/charge once per `interval_ms` worth of samples.
+/// The interval is counted in samples, so USB buffering doesn't skew it. Its (wall clock) duration is printed
+/// too: a clearly longer duration than the interval means samples were missed.
+/// With a `source_mv` (source meter mode) the average power is printed as well.
+fn run_stats(ppk2: Ppk2, interval_ms: u64, source_mv: Option<u16>) -> Result<()> {
+    const SPS: usize = 100_000;
+    let (rx, kill) = ppk2.start_measurement(SPS)?;
+
+    let mut kill = Some(kill);
+    ctrlc::set_handler(move || {
+        kill.take().unwrap()().unwrap();
+    })?;
+
+    let samples_per_interval = (SPS as u64 * interval_ms / 1000).max(1);
+    let mut stats = Stats::default();
+    let mut start = Instant::now();
+
+    loop {
+        match rx.recv_timeout(Duration::from_millis(2000)) {
+            Ok(MeasurementMatch::Match(m)) => {
+                stats.add(m.micro_amps);
+
+                if stats.count >= samples_per_interval {
+                    let n = stats.count as f64;
+                    let avg = stats.sum / n;
+                    info!(
+                        "avg: {avg:9.3} µA  rms: {:9.3} µA  min: {:9.3} µA  max: {:9.3} µA  charge: {:9.3} µC  ({} samples in {:.3} s)",
+                        (stats.sum_sq / n).sqrt(),
+                        stats.min,
+                        stats.max,
+                        avg * n / SPS as f64,
+                        stats.count,
+                        start.elapsed().as_secs_f64()
+                    );
+                    if let Some(mv) = source_mv {
+                        // The PPK2 regulates the source voltage, so the power is simply V * I_avg (µA * V = µW)
+                        info!("avg_pwr: {} (at {mv} mV)", format_power(avg * f64::from(mv) / 1000.));
+                    }
+
+                    stats = Stats::default();
+                    start = Instant::now();
+                }
+            }
+            Ok(MeasurementMatch::NoMatch) => {}
+            Err(RecvTimeoutError::Disconnected) => break Ok(()),
+            Err(e) => {
+                error!("Error receiving data: {e:?}");
+                break Err(e)?;
+            }
+        }
+    }
 }
