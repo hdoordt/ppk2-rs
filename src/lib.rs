@@ -22,7 +22,8 @@ pub mod cmd;
 pub mod measurement;
 pub mod types;
 
-const SPS_MAX: usize = 100_000;
+/// The fixed sample rate of the PPK2 device is 100kHz.
+const PPK2_SAMPLE_RATE: usize = 100_000;
 
 #[derive(Error, Debug)]
 /// PPK2 communication or data parsing error.
@@ -187,11 +188,11 @@ impl Ppk2 {
                    feeding the accumulator with the data.
                 */
                 let mut buf = [0u8; 4];
-                let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
+                let mut measurement_buf = VecDeque::with_capacity(PPK2_SAMPLE_RATE);
                 let mut missed = 0;
+
                 loop {
-                    // Check whether the main thread has signaled
-                    // us to stop
+                    // Check whether the main thread has signaled us to stop
                     match sig_rx.try_recv() {
                         Ok(_) => return Ok(()),
                         Err(TryRecvError::Empty) => {}
@@ -202,8 +203,15 @@ impl Ppk2 {
                     let n = port.read(&mut buf)?;
                     missed += accumulator.feed_into(&buf[..n], &mut measurement_buf);
                     let len = measurement_buf.len();
-                    if len >= SPS_MAX / sps {
-                        let measurement = measurement_buf.drain(..).combine_matching(missed, pins);
+
+                    // We have a full chunk of samples to be processed
+                    if len >= PPK2_SAMPLE_RATE / sps {
+                        if missed > 0 {
+                            tracing::warn!(
+                                "{missed} samples missed ({len} received in this chunk)"
+                            );
+                        }
+                        let measurement = measurement_buf.drain(..).combine_matching(pins);
                         meas_tx.send(measurement)?;
                         missed = 0;
                     }
