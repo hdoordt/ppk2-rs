@@ -55,6 +55,12 @@ impl SourceVoltage {
         }
     }
 
+    /// The source voltage in millivolts (after clamping by [SourceVoltage::from_millivolts]).
+    pub fn millivolts(&self) -> u16 {
+        let diff_to_baseline = u16::from(self.raw[0].saturating_sub(3)) * 256 + u16::from(self.raw[1]);
+        (diff_to_baseline + Self::VDD_MIN_MV).saturating_sub(Self::OFFSET)
+    }
+
     pub(crate) fn raw(&self) -> &[u8; 2] {
         &self.raw
     }
