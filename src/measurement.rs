@@ -75,14 +75,10 @@ impl MeasurementAccumulator {
             let prev_expected_counter = self.state.expected_counter;
             // Wrap at 63 + 1
             self.state.expected_counter.replace((counter + 1) & 0x3F);
-            if let Some(prev_count) = prev_expected_counter {
-                if prev_count < counter {
-                    samples_missed += (counter - prev_count) as usize;
-                    continue;
-                } else if prev_expected_counter > Some(counter) {
-                    samples_missed += (prev_count - counter) as usize;
-                    continue;
-                }
+            if let Some(expected) = prev_expected_counter {
+                // Number of samples lost before this one, modulo the 6 bit counter (handles wrapping).
+                // This sample itself is valid, so it's kept.
+                samples_missed += (counter.wrapping_sub(expected) & 0x3F) as usize;
             }
 
             let adc_result = get_adc(raw) * 4;
@@ -140,7 +136,8 @@ fn get_adc_result(
     state.prev_range.get_or_insert(range);
 
     if !matches!(state.prev_range, Some(r) if r == range) || state.after_spike > 0 {
-        if matches!(state.prev_range, Some(r) if r == range) {
+        // Range changed: filter the next `SPIKE_FILTER_SAMPLES` samples (as the Nordic Power Profiler does)
+        if !matches!(state.prev_range, Some(r) if r == range) {
             state.consecutive_range_sample = 0;
             state.after_spike = SPIKE_FILTER_SAMPLES;
         } else {
@@ -177,23 +174,24 @@ pub trait MeasurementIterExt {
     /// If there are none, [MeasurementMatch::NoMatch] is returned.
     /// Set combined logic port pin high if and only if more than half
     /// of the measurements indicate the pin was high
-    fn combine(self, missed: usize) -> MeasurementMatch;
+    fn combine(self) -> MeasurementMatch;
 
     /// Combine items with matching logic port state into a single [MeasurementMatch::Match],
     /// if there are items. If there are none, [MeasurementMatch::NoMatch] is returned.
     /// Set combined logic port pin high if and only if more than half
     /// of the measurements indicate the pin was high
-    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> MeasurementMatch;
+    fn combine_matching(self, matching_pins: LogicPortPins) -> MeasurementMatch;
 }
 
 impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
-    fn combine(self, missed: usize) -> MeasurementMatch {
+    fn combine(self) -> MeasurementMatch {
         let mut pin_high_count = [0usize; 8];
         let mut count = 0;
-        let mut sum = 0f32;
+        // f64: summing thousands of f32 samples loses precision
+        let mut sum = 0f64;
         self.for_each(|m| {
             count += 1;
-            sum += m.micro_amps;
+            sum += f64::from(m.micro_amps);
             m.pins
                 .inner()
                 .iter()
@@ -215,7 +213,9 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
             .enumerate()
             .filter(|(_, p)| *p > count / 2)
             .for_each(|(i, _)| pins[i] = true);
-        let avg = sum / (count - missed) as f32;
+
+        // Missed samples are neither in `sum` nor in `count`: average over the samples actually received
+        let avg = (sum / count as f64) as f32;
 
         MeasurementMatch::Match(Measurement {
             micro_amps: avg,
@@ -223,7 +223,7 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
         })
     }
 
-    fn combine_matching(self, missed: usize, matching_pins: LogicPortPins) -> MeasurementMatch {
+    fn combine_matching(self, matching_pins: LogicPortPins) -> MeasurementMatch {
         let iter = self.filter(|m| {
             m.pins
                 .inner()
@@ -231,7 +231,8 @@ impl<I: Iterator<Item = Measurement>> MeasurementIterExt for I {
                 .enumerate()
                 .all(|(i, l)| l.matches(matching_pins.inner()[i]))
         });
-        iter.combine(missed)
+
+        iter.combine()
     }
 }
 

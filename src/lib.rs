@@ -189,6 +189,7 @@ impl Ppk2 {
                 let mut buf = [0u8; 4];
                 let mut measurement_buf = VecDeque::with_capacity(SPS_MAX);
                 let mut missed = 0;
+
                 loop {
                     // Check whether the main thread has signaled
                     // us to stop
@@ -202,8 +203,14 @@ impl Ppk2 {
                     let n = port.read(&mut buf)?;
                     missed += accumulator.feed_into(&buf[..n], &mut measurement_buf);
                     let len = measurement_buf.len();
+
                     if len >= SPS_MAX / sps {
-                        let measurement = measurement_buf.drain(..).combine_matching(missed, pins);
+                        if missed > 0 {
+                            tracing::warn!(
+                                "{missed} samples missed ({len} received in this chunk)"
+                            );
+                        }
+                        let measurement = measurement_buf.drain(..).combine_matching(pins);
                         meas_tx.send(measurement)?;
                         missed = 0;
                     }
