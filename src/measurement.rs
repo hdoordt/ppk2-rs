@@ -12,7 +12,7 @@ const SPIKE_FILTER_SAMPLES: isize = 3;
 #[derive(Debug)]
 /// A single parsed measurement
 pub struct Measurement {
-    /// The measured current in mA.
+    /// The measured current in µA.
     pub micro_amps: f32,
     /// Logic port bits
     pub pins: LogicPortPins,
